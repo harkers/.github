@@ -51,6 +51,7 @@ gates:
     predicate: check_declared_gates
     artifact_required: delivery.pull_request
     enforced: true
+    when: { delivery_mode: pull_request }
     note: "branch pushed and a draft PR exists using the repository PR template"
   - state: IMPLEMENTATION_COMPLETE
     enforced: false

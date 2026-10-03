@@ -7,8 +7,14 @@ must not do is enumerate the contract, or they become a fourth description of it
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 
-from workitem_conformance.contract import band_for, load_contract, load_example
+from workitem_conformance.contract import (
+    band_for,
+    combinations,
+    load_contract,
+    load_example,
+)
 from workitem_conformance.gates import (
     check_before,
     check_declared_gates,
@@ -16,7 +22,7 @@ from workitem_conformance.gates import (
     check_review_transition,
     check_sizing,
 )
-from workitem_conformance.transitions import TransitionEngine
+from workitem_conformance.transitions import TransitionEngine, default_context
 
 # Named here as fixtures only. The library under test names no state at all.
 READY = "READY"
@@ -260,3 +266,84 @@ def test_every_enforced_gate_names_a_predicate_that_exists() -> None:
         name = gate.get("predicate")
         assert name, f"{gate['state']} is enforced but names no predicate"
         assert callable(getattr(gates_module, name, None)), name
+
+
+def test_gate_with_when_is_skipped_for_other_modes() -> None:
+    """A `when` that does not match must stop the gate firing, not fail it."""
+    c = load_contract()
+    item = _workitem()
+    item["delivery"] = {"mode": "branch_only", "branch": "wi/WI-x/y", "pull_request": None}
+    failures = check_declared_gates(item, c.policy).failures
+    assert not [f for f in failures if "PR_DRAFT" in f], failures
+
+
+def test_pr_draft_gate_only_binds_for_pull_request() -> None:
+    """The specific incoherence: branch_only has no PR, so the gate cannot demand one."""
+    c = load_contract()
+    item = _workitem()
+    item["artifacts"]["specification"] = "s.md"
+    item["artifacts"]["implementation_plan"] = "p.md"
+    item["artifacts"]["commits"] = ["abc"]
+    item["completion"]["packet"] = "packet.md"
+    item["delivery"] = {"mode": "pull_request", "branch": "wi/x", "pull_request": None}
+    assert [f for f in check_declared_gates(item, c.policy).failures if "PR_DRAFT" in f]
+
+    item["delivery"] = {"mode": "branch_only", "branch": "wi/x", "pull_request": None}
+    assert not [f for f in check_declared_gates(item, c.policy).failures if "PR_DRAFT" in f]
+
+
+def test_no_reachable_state_has_an_unsatisfiable_gate() -> None:
+    """I3: no gate may demand a field the active mode forbids.
+
+    Born green by design. A gate can only be unsatisfiable if the schema forbids
+    the field, so this becomes meaningful once the schema constraint lands. It
+    guards against future incoherence; it does not demonstrate a present one.
+    """
+    contract = load_contract()
+    forbidden = _forbidden_by_mode(contract)
+    assert forbidden, "the schema declares no mode forbiddance, so I3 cannot bite yet"
+    for mode, policy in combinations(contract):
+        for state in _reachable(contract, mode, policy):
+            for gate in contract.policy["gates"]:
+                if gate["state"] != state or not gate.get("enforced"):
+                    continue
+                required = gate.get("artifact_required")
+                if not required:
+                    continue
+                when = gate.get("when") or {}
+                if "delivery_mode" in when and when["delivery_mode"] != mode:
+                    continue
+                assert required not in forbidden.get(mode, set()), (
+                    f"{mode}/{policy}: {state} demands {required}, which the mode forbids"
+                )
+
+
+def _forbidden_by_mode(contract) -> dict[str, set[str]]:
+    """Fields the schema nulls per mode. Read from the schema, never hardcoded."""
+    out: dict[str, set[str]] = {}
+    for clause in contract.schema.get("allOf", []):
+        condition = clause.get("if", {}).get("properties", {}).get("delivery", {})
+        mode = condition.get("properties", {}).get("mode", {})
+        key = mode.get("const") or (mode.get("enum") or [None])[0]
+        if key is None:
+            continue
+        fields = (
+            clause.get("then", {}).get("properties", {}).get("delivery", {}).get("properties", {})
+        )
+        out[key] = {
+            f"delivery.{name}" for name, spec in fields.items() if spec.get("type") == "null"
+        }
+    return out
+
+
+def _reachable(contract, mode: str, policy: str) -> set[str]:
+    engine = TransitionEngine(contract.state_machine)
+    ctx = replace(default_context(), delivery_mode=mode, review_policy=policy)
+    seen, frontier = {"DRAFT"}, ["DRAFT"]
+    while frontier:
+        current = frontier.pop()
+        for nxt in engine.outgoing(current):
+            if engine.check(current, nxt, ctx).legal and nxt not in seen:
+                seen.add(nxt)
+                frontier.append(nxt)
+    return seen
