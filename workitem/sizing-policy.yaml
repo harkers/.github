@@ -1,0 +1,21 @@
+schema: workitem-sizing-policy
+version: "1.0"
+
+# Bands are inclusive-exclusive on estimated_context_tokens, ascending.
+bands:
+  - name: SMALL
+    max_tokens: 8000
+  - name: MEDIUM
+    max_tokens: 20000
+  - name: LARGE
+    max_tokens: 40000
+  - name: XL
+    max_tokens: null          # unbounded upper end
+
+decomposition:
+  required_when_band: XL
+  assessment_required_when_band: LARGE
+  note: >-
+    The band is derived from estimated_context_tokens. WorkItems MUST NOT store a
+    decomposition flag; a stored boolean drifts from the estimate it was derived
+    from, which is the failure already recorded in workhub TODO-003..TODO-008.

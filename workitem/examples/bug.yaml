@@ -1,0 +1,97 @@
+schema: workitem
+schema_version: "1.0"
+id: WI-20261003-0002
+
+identity:
+  type: BUG
+  title: "Dependency resolver allows blocked tasks to become runnable"
+  description: >-
+    A WorkItem whose blocking dependency is unresolved is being treated as
+    runnable, so execution starts before its prerequisite completes.
+
+hierarchy:
+  epic: foundation
+  parent: WI-20261003-0001
+
+source:
+  type: bug_report
+  issue: 26
+  requested_by: reviewer
+  created_by: workhub
+
+priority: HIGH
+state: DRAFT
+
+scope:
+  allowed_paths: ["src/workhub/domain/", "tests/domain/"]
+  denied_paths: []
+
+privacy:
+  level: INTERNAL
+  network: allowed
+
+delivery:
+  mode: pull_request
+  branch: null
+  pull_request: null
+
+execution:
+  worker_role: builder-primary
+  capability: builder
+  preferred_model: qwen3-coder-next
+  resource_class: auto
+  max_attempts: 3
+
+dependencies:
+  - target: WI-20261003-0001
+    type: BLOCKS
+
+acceptance_criteria:
+  - id: AC-001
+    description: "The defect reproduces before the fix"
+    status: pending
+    verification_method: command
+    expected: "pytest tests/domain/test_resolver.py::test_blocked_not_runnable fails on the parent commit"
+  - id: AC-002
+    description: "The defect no longer reproduces after the fix"
+    status: pending
+    verification_method: command
+    expected: "pytest tests/domain exits 0 with no regression in the resolver suite"
+
+verification:
+  review_policy: normal
+  required: [tests, local_review, cloud_review]
+  tests:
+    status: pending
+    evidence: []
+  local_review:
+    status: pending
+    evidence: []
+  cloud_review:
+    status: pending
+    evidence: []
+  specialist_review:
+    status: not_applicable
+    evidence: []
+
+sizing:
+  estimated_complexity: SMALL
+  estimated_context_tokens: 6000
+
+artifacts:
+  specification: null
+  implementation_plan: null
+  commits: []
+  completion_packet: null
+
+attempts: []
+
+completion:
+  status: incomplete
+  packet: null
+
+timestamps:
+  created_at: null
+  updated_at: null
+  started_at: null
+  completed_at: null
