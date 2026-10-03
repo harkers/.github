@@ -68,8 +68,13 @@ parameters:
     field: delivery.mode
     values: [pull_request, branch_only, none]
     default: pull_request
-    # States unreachable when the WorkItem produces no branch or PR.
-    skips_states: [COMMITTED, PR_DRAFT, IMPLEMENTATION_COMPLETE, PR_READY]
+    # States unreachable under each mode. Gates in policy.yaml consult the same
+    # list through their own `when:` conditions, so the graph and the gates cannot
+    # disagree about what a mode means.
+    skips_states_by_mode:
+      pull_request: []
+      branch_only:  [PR_DRAFT, PR_READY]
+      none:         [COMMITTED, PR_DRAFT, IMPLEMENTATION_COMPLETE, PR_READY]
 
 transitions:
   # Happy path, in order.
@@ -89,8 +94,13 @@ transitions:
   - { from: REPORTING,          to: PR_READY }
   - { from: PR_READY,           to: DONE }
 
-  # delivery.mode = none short-circuits the delivery states.
-  - { from: VALIDATED,          to: TESTING,        when: { delivery_mode: none } }
+  # Bypass edges. One per mode that skips a state on the route to DONE. Without
+  # these, skipping PR_READY removes the only incoming edge of DONE and the
+  # WorkItem can never finish.
+  - { from: VALIDATED,          to: TESTING,               when: { delivery_mode: none } }
+  - { from: COMMITTED,          to: IMPLEMENTATION_COMPLETE, when: { delivery_mode: branch_only } }
+  - { from: REPORTING,          to: DONE,                   when: { delivery_mode: branch_only } }
+  - { from: REPORTING,          to: DONE,                   when: { delivery_mode: none } }
 
   # Repair loops. The round count survives into the event stream because
   # CHANGES_REQUIRED is a real state, not an implicit edge back to IN_PROGRESS.

@@ -177,3 +177,71 @@ def test_the_machine_declares_everything_the_tests_rely_on() -> None:
         "the repair state must be exceptional, not a happy-path stage"
     )
     assert machine["parameters"]["delivery_mode"]["values"]
+
+
+def _machine_with_two_conditionals_for_one_pair() -> dict:
+    """Two REPORTING -> DONE edges, one per mode. The case the fix depends on."""
+    return {
+        "states": {"happy_path": ["DRAFT", "REPORTING", "DONE"], "exceptional": []},
+        "terminal": ["DONE"],
+        "repair": {"state": "NONE", "resume_state": "DRAFT", "entry_states": []},
+        "failure": {"state": "NONE", "resume_state": "DRAFT", "entry_states": []},
+        "parameters": {
+            "delivery_mode": {
+                "field": "delivery.mode",
+                "values": ["pull_request", "branch_only", "none"],
+                "default": "pull_request",
+                "skips_states_by_mode": {
+                    "pull_request": [],
+                    "branch_only": [],
+                    "none": [],
+                },
+            }
+        },
+        "transitions": [
+            {"from": "DRAFT", "to": "REPORTING"},
+            {"from": "REPORTING", "to": "DONE", "when": {"delivery_mode": "branch_only"}},
+            {"from": "REPORTING", "to": "DONE", "when": {"delivery_mode": "none"}},
+        ],
+    }
+
+
+def test_both_conditionals_for_one_pair_are_honoured() -> None:
+    """A duplicate (from, to) pair must not shadow: first-wins made `none` unreachable."""
+    engine = TransitionEngine(_machine_with_two_conditionals_for_one_pair())
+    assert engine.check("REPORTING", "DONE", _ctx(delivery_mode="branch_only")).legal
+    assert engine.check("REPORTING", "DONE", _ctx(delivery_mode="none")).legal
+    assert not engine.check("REPORTING", "DONE", _ctx(delivery_mode="pull_request")).legal
+
+
+def test_edge_specs_returns_every_variant_for_a_duplicated_pair() -> None:
+    engine = TransitionEngine(_machine_with_two_conditionals_for_one_pair())
+    variants = engine.edge_specs("REPORTING", "DONE")
+    assert [v["when"]["delivery_mode"] for v in variants] == ["branch_only", "none"]
+
+
+def test_edge_specs_is_empty_for_an_undeclared_pair() -> None:
+    engine = TransitionEngine(_machine_with_two_conditionals_for_one_pair())
+    assert engine.edge_specs("DRAFT", "DONE") == []
+
+
+def test_skips_are_read_per_mode_not_only_for_none() -> None:
+    machine = _machine_with_two_conditionals_for_one_pair()
+    machine["parameters"]["delivery_mode"]["skips_states_by_mode"]["none"] = ["REPORTING"]
+    engine = TransitionEngine(machine)
+    assert engine.skipped_by_delivery_mode("none") == ["REPORTING"]
+    assert engine.skipped_by_delivery_mode("branch_only") == []
+    assert engine.skipped_by_delivery_mode("a_mode_nobody_declared") == []
+
+
+def test_a_skipped_destination_is_refused_for_every_edge_kind() -> None:
+    """The skip must win over unconditional, conditional and wildcard alike."""
+    machine = _machine_with_two_conditionals_for_one_pair()
+    machine["parameters"]["delivery_mode"]["skips_states_by_mode"]["none"] = ["DONE"]
+    machine["transitions"].append({"from": "DRAFT", "to": "DONE"})
+    machine["transitions"].append(
+        {"from": "*", "to": "DONE", "when": {"source_not_terminal": True}}
+    )
+    engine = TransitionEngine(machine)
+    assert not engine.check("DRAFT", "DONE", _ctx(delivery_mode="none")).legal
+    assert engine.check("DRAFT", "DONE", _ctx(delivery_mode="pull_request")).legal

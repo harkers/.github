@@ -87,6 +87,15 @@ no_entry_gate:
   - state: IN_PROGRESS
     reason: "inherits the READY gate; dependencies are resolved on the way in"
 
+# Declared so the cross-product test can enumerate it, and so the asymmetry
+# between the two parameters is a fact in the contract rather than a comment:
+# delivery_mode governs edges, review_policy governs gates.
+parameters:
+  review_policy:
+    field: verification.review_policy
+    values: [low_risk, normal, security_sensitive, high_risk]
+    affects: gates
+
 review_policy:
   field: verification.review_policy
   values: [low_risk, normal, security_sensitive, high_risk]
