@@ -1,0 +1,29 @@
+name: InputsProbe
+on:
+  workflow_call:
+    inputs:
+      contract-ref:
+        description: Pinned contract tag to validate against. Never a branch.
+        required: false
+        default: workitem/v1
+        type: string
+      contract-repo:
+        description: Repository holding the canonical contract.
+        required: false
+        default: harkers/.github
+        type: string
+      workitem-glob:
+        description: Path pattern for WorkItem instances in the calling repository.
+        required: false
+        default: .workhub/workitems/*/workitem.yaml
+        type: string
+      require-contract-pin:
+        description: Fail when contract-ref is not a pinned contract tag.
+        required: false
+        default: "true"
+        type: boolean
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "inputs block accepted"
