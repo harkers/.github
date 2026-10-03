@@ -50,7 +50,7 @@ on:
 
 jobs:
   validate:
-    name: Validate WorkItems against ${{ inputs.contract-ref }}
+    name: Validate WorkItems
     runs-on: ubuntu-latest
     permissions:
       contents: read
