@@ -27,6 +27,7 @@ class Contract:
     root: Path
     schema: dict[str, Any]
     state_machine: dict[str, Any]
+    policy: dict[str, Any]
     sizing_policy: dict[str, Any]
 
 
@@ -54,6 +55,7 @@ def load_contract(root: Path | None = None) -> Contract:
         root=base,
         schema=_read_json(base, "workitem/v1.schema.json"),
         state_machine=_read_yaml(base, "workitem/state-machine.yaml"),
+        policy=_read_yaml(base, "workitem/policy.yaml"),
         sizing_policy=_read_yaml(base, "workitem/sizing-policy.yaml"),
     )
 

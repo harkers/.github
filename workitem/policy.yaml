@@ -1,0 +1,111 @@
+schema: workitem-policy
+version: "1.0"
+
+# Sole definition of gate rules and forbidden transitions. Gate code reads this
+# file; it does not restate these conditions.
+
+required_before:
+  READY:
+    acceptance_criteria_min: 1
+    acceptance_criteria_must_be_measurable: true
+    sizing_required: true
+    scope_required: true
+    privacy_required: true
+
+  DONE:
+    all_required_verification: passed
+    completion_packet_required: true
+
+# The full gate table from spec section 7. `enforced: true` means a predicate
+# in gates.py checks it. `enforced: false` means the condition needs human or
+# reviewer judgement and is recorded here so the contract stays the single
+# definition rather than living only in prose.
+gates:
+  - state: SPEC_READY
+    predicate: check_declared_gates
+    artifact_required: artifacts.specification
+    enforced: true
+    note: "problem, goals, non-goals, interfaces, failure modes and criteria are defined"
+  - state: PLAN_READY
+    predicate: check_declared_gates
+    artifact_required: artifacts.implementation_plan
+    enforced: true
+    note: "bounded implementation tasks and validation steps exist"
+  - state: READY
+    predicate: check_before
+    enforced: true
+    note: "see required_before.READY"
+  - state: IMPLEMENTED
+    enforced: false
+    note: "scoped implementation changes exist; requires diff inspection"
+  - state: VALIDATED
+    enforced: false
+    note: "scoped validation passed; the command and its result must be recorded"
+  - state: COMMITTED
+    predicate: check_declared_gates
+    artifact_required: artifacts.commits
+    artifact_min_items: 1
+    enforced: true
+    note: "approved changes committed atomically"
+  - state: PR_DRAFT
+    predicate: check_declared_gates
+    artifact_required: delivery.pull_request
+    enforced: true
+    note: "branch pushed and a draft PR exists using the repository PR template"
+  - state: IMPLEMENTATION_COMPLETE
+    enforced: false
+    note: "all planned subtasks committed to the PR branch; requires plan comparison"
+  - state: TESTING
+    enforced: false
+    note: "independent tests are exercising completion claims"
+  - state: REVIEWING
+    predicate: check_review_transition
+    enforced: true
+    note: "see review_policy below"
+  - state: VERIFYING
+    enforced: false
+    note: "material claims checked against resolved evidence"
+  - state: REPORTING
+    predicate: check_declared_gates
+    artifact_required: completion.packet
+    enforced: true
+    note: "completion packet produced"
+  - state: PR_READY
+    enforced: false
+    note: "all configured gates passed; check is a reviewer or policy action"
+  - state: DONE
+    predicate: check_before
+    enforced: true
+    note: "see required_before.DONE"
+
+# Happy-path states with no entry gate of their own. DRAFT is where a WorkItem
+# starts; IN_PROGRESS inherits READY's preconditions, which is what "dependencies
+# resolved" means. Declared so the omission is explicit rather than a gap.
+no_entry_gate:
+  - state: DRAFT
+    reason: "entry state; a WorkItem begins here with no precondition"
+  - state: IN_PROGRESS
+    reason: "inherits the READY gate; dependencies are resolved on the way in"
+
+review_policy:
+  field: verification.review_policy
+  values: [low_risk, normal, security_sensitive, high_risk]
+  required_evidence:
+    low_risk: [local_review]
+    normal: [local_review, cloud_review]
+    security_sensitive: [local_review, cloud_review, specialist_review]
+    high_risk: [local_review, cloud_review, specialist_review]
+  not_applicable_is_sufficient: false
+
+immutable_after:
+  - field: acceptance_criteria
+    after_state: PLAN_READY
+    reason: >-
+      Success must not be defined retrospectively once implementation has begun.
+
+forbidden_transitions:
+  - { from: READY,        to: DONE, reason: "No WorkItem reaches DONE from READY." }
+  - { from: IN_PROGRESS,  to: DONE, reason: "IMPLEMENTED is not DONE." }
+  - { from: IMPLEMENTED,  to: DONE, reason: "Verification and review gates are mandatory." }
+  - { from: TESTING,      to: DONE, reason: "Review and verification gates are mandatory." }
+  - { from: DONE,         to: IN_PROGRESS, reason: "DONE is terminal." }
