@@ -1,0 +1,75 @@
+schema: workitem
+schema_version: '1.0'
+id: WI-20261003-0004
+identity:
+  type: INVESTIGATION
+  title: Determine whether the existing task-state ladder needs a 16th state
+  description: Establish whether any state in the canonical ladder is unreachable in practice, and whether
+    any missing state is reachable in practice, before the contract is pinned beyond v1.
+hierarchy:
+  epic: foundation
+  parent: null
+source:
+  type: user_request
+  issue: null
+  requested_by: user
+  created_by: workhub
+priority: LOW
+state: DRAFT
+scope:
+  allowed_paths:
+  - docs/
+  denied_paths:
+  - src/
+privacy:
+  level: INTERNAL
+  network: denied
+delivery:
+  mode: none
+  branch: wi/WI-20261003-0004/some-branch
+  pull_request: null
+execution:
+  worker_role: repo-scout
+  capability: scout
+  preferred_model: null
+  resource_class: auto
+  max_attempts: 1
+dependencies: []
+acceptance_criteria:
+- id: AC-001
+  description: Every canonical state is either observed or justified as unreachable
+  status: pending
+  verification_method: artifact
+  expected: evidence/ladder-findings.md names all 16 states with an observation or a justification
+verification:
+  review_policy: low_risk
+  required: []
+  tests:
+    status: not_applicable
+    evidence: []
+  local_review:
+    status: not_applicable
+    evidence: []
+  cloud_review:
+    status: not_applicable
+    evidence: []
+  specialist_review:
+    status: not_applicable
+    evidence: []
+sizing:
+  estimated_complexity: SMALL
+  estimated_context_tokens: 4000
+artifacts:
+  specification: null
+  implementation_plan: null
+  commits: []
+  completion_packet: null
+attempts: []
+completion:
+  status: incomplete
+  packet: null
+timestamps:
+  created_at: null
+  updated_at: null
+  started_at: null
+  completed_at: null

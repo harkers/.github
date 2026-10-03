@@ -51,6 +51,7 @@ gates:
     predicate: check_declared_gates
     artifact_required: delivery.pull_request
     enforced: true
+    when: { delivery_mode: pull_request }
     note: "branch pushed and a draft PR exists using the repository PR template"
   - state: IMPLEMENTATION_COMPLETE
     enforced: false
@@ -86,6 +87,15 @@ no_entry_gate:
     reason: "entry state; a WorkItem begins here with no precondition"
   - state: IN_PROGRESS
     reason: "inherits the READY gate; dependencies are resolved on the way in"
+
+# Declared so the cross-product test can enumerate it, and so the asymmetry
+# between the two parameters is a fact in the contract rather than a comment:
+# delivery_mode governs edges, review_policy governs gates.
+parameters:
+  review_policy:
+    field: verification.review_policy
+    values: [low_risk, normal, security_sensitive, high_risk]
+    affects: gates
 
 review_policy:
   field: verification.review_policy

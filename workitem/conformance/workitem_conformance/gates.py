@@ -36,6 +36,22 @@ def _read(workitem: dict[str, Any], dotted: str) -> Any:
     return value
 
 
+def _condition_met(workitem: dict[str, Any], when: dict[str, Any] | None) -> bool:
+    """Evaluate a gate's `when` clause against the record.
+
+    Mirrors the state machine's condition syntax so there is one mechanism, not
+    two. A gate with no `when` applies unconditionally.
+    """
+    if not when:
+        return True
+    if "delivery_mode" in when:
+        expected = when["delivery_mode"]
+        allowed = expected if isinstance(expected, list) else [expected]
+        if _read(workitem, "delivery.mode") not in allowed:
+            return False
+    return True
+
+
 def _present(workitem: dict[str, Any], dotted: str) -> bool:
     return _read(workitem, dotted) not in (None, "", [], {})
 
@@ -153,6 +169,8 @@ def check_declared_gates(workitem: dict[str, Any], policy: dict[str, Any]) -> Ga
     failures: list[str] = []
     for gate in policy.get("gates", []):
         if not gate.get("enforced"):
+            continue
+        if not _condition_met(workitem, gate.get("when")):
             continue
         dotted = gate.get("artifact_required")
         if not dotted:

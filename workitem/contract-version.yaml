@@ -1,19 +1,29 @@
 schema: workitem-contract-version
 version: "1.0"
 
-current: v1
+current: v1.1
 
 # Contract versions are git tags in harkers/.github. Consumers pin a tag and
 # MUST NOT consume an unpinned moving ref. A version with released: null is
 # declared but not yet available; only `current` and later tags may be pinned.
 versions:
+  # Contract versions are git tags in harkers/.github. Consumers pin a tag and
+  # MUST NOT consume an unpinned moving ref.
+  #
+  # `schema_version` maps a tag to the record schema it validates. A contract *data*
+  # release -- one that changes the state machine or policy without adding, removing
+  # or retyping a field -- keeps the same schema_version. Tightening a constraint is
+  # such a release. See the design spec's D8.
   - tag: workitem/v1
     schema_version: "1.0"
     released: "2026-10-03"
-    supersedes: "0.9"
+    superseded_by: workitem/v1.1
   - tag: workitem/v1.1
-    schema_version: "1.1"
-    released: null
+    schema_version: "1.0"
+    released: "2026-10-03"
+    note: >-
+      Delivery-mode reachability fix. Adds no field; tightens the schema so a
+      record cannot contradict its delivery.mode.
   - tag: workitem/v2
     schema_version: "2.0"
     released: null

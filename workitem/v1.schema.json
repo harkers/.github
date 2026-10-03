@@ -184,6 +184,22 @@
     }
   },
 
+  "allOf": [
+    {
+      "if": { "properties": { "delivery": { "properties": { "mode": { "const": "none" } } } } },
+      "then": { "properties": { "delivery": { "properties": {
+        "branch": { "type": "null" },
+        "pull_request": { "type": "null" }
+      } } } }
+    },
+    {
+      "if": { "properties": { "delivery": { "properties": { "mode": { "const": "branch_only" } } } } },
+      "then": { "properties": { "delivery": { "properties": {
+        "pull_request": { "type": "null" }
+      } } } }
+    }
+  ],
+
   "$defs": {
     "verificationCheck": {
       "type": "object", "additionalProperties": false,

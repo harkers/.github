@@ -78,3 +78,18 @@ def band_for(tokens: int, sizing_policy: dict[str, Any]) -> str:
 def requires_decomposition(tokens: int, sizing_policy: dict[str, Any]) -> bool:
     """True when the derived band mandates decomposition before execution."""
     return band_for(tokens, sizing_policy) == sizing_policy["decomposition"]["required_when_band"]
+
+
+def parameter_modes(contract: Contract) -> list[str]:
+    """Declared delivery_mode values, in declaration order."""
+    return list(contract.state_machine["parameters"]["delivery_mode"]["values"])
+
+
+def parameter_policies(contract: Contract) -> list[str]:
+    """Declared review_policy values, in declaration order."""
+    return list(contract.policy["parameters"]["review_policy"]["values"])
+
+
+def combinations(contract: Contract) -> list[tuple[str, str]]:
+    """Every (delivery_mode, review_policy) pair the contract declares."""
+    return [(m, p) for m in parameter_modes(contract) for p in parameter_policies(contract)]

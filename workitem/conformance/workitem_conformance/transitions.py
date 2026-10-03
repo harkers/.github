@@ -50,11 +50,13 @@ class TransitionEngine:
         self._declared: set[tuple[str, str]] = set()
         self._conditional: list[tuple[str, str, dict[str, Any]]] = []
         self._wildcards: list[tuple[str, dict[str, Any]]] = []
-        self._specs: dict[tuple[str, str], dict[str, Any]] = {}
+        self._specs: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for edge in machine["transitions"]:
             frm, to = edge["from"], edge["to"]
             when = edge.get("when")
-            self._specs[(frm, to)] = edge
+            # A pair may legitimately appear twice with different conditions, so
+            # collect every variant rather than keeping only one.
+            self._specs.setdefault((frm, to), []).append(edge)
             if frm == WILDCARD:
                 self._wildcards.append((to, when or {}))
             elif when:
@@ -71,9 +73,15 @@ class TransitionEngine:
     def happy_path(self) -> dict[str, int]:
         return {name: i for i, name in enumerate(self._happy)}
 
+    def edge_specs(self, frm: str, to: str) -> list[dict[str, Any]]:
+        """Every declared variant of this edge, in declaration order."""
+        return list(self._specs.get((frm, to), []))
+
     def edge_spec(self, frm: str, to: str) -> dict[str, Any]:
-        """The raw declared edge, including any `when` condition. Never invents one."""
-        return self._specs.get((frm, to), {})
+        """The single variant, or an empty dict. Prefer edge_specs() where a pair
+        may be duplicated."""
+        variants = self.edge_specs(frm, to)
+        return variants[0] if variants else {}
 
     def edges(self) -> list[tuple[str, str]]:
         return sorted(self._declared | self._conditional_edges())
@@ -93,10 +101,9 @@ class TransitionEngine:
         return sorted(to for to, _ in self._wildcards)
 
     def skipped_by_delivery_mode(self, delivery_mode: str) -> list[str]:
-        for name, spec in self.machine["parameters"].items():
-            if name == "delivery_mode" and delivery_mode == "none":
-                return list(spec["skips_states"])
-        return []
+        """States unreachable under this mode. An undeclared mode skips nothing."""
+        by_mode = self.machine.get("parameters", {}).get("delivery_mode", {})
+        return list(by_mode.get("skips_states_by_mode", {}).get(delivery_mode, []))
 
     def declared(self, frm: str, to: str) -> bool:
         """Is this edge in the contract, ignoring context? Exhaustive by construction."""
@@ -123,11 +130,16 @@ class TransitionEngine:
         if to in skipped:
             return Verdict(False, f"{to} is unreachable under delivery.mode={ctx.delivery_mode}")
 
+        # Scan every conditional for this pair. A pair may be declared once per
+        # mode, so first-match-wins would refuse whichever condition came second.
+        matched = False
         for cfrm, cto, when in self._conditional:
             if cfrm == frm and cto == to:
+                matched = True
                 if when.get("delivery_mode") == ctx.delivery_mode:
                     return Verdict(True, f"conditional edge for delivery.mode={ctx.delivery_mode}")
-                return Verdict(False, f"conditional edge requires {when}")
+        if matched:
+            return Verdict(False, "every declared condition on this edge was unmet")
 
         for target, when in self._wildcards:
             if target == to and when.get("source_not_terminal"):

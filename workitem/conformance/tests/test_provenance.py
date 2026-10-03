@@ -138,3 +138,36 @@ def test_documented_migration_example_parses_as_yaml() -> None:
                 assert set(step) >= {"id", "target", "transform"}, step
             return
     pytest.fail("no workitem-migration example found in migrations/README.md")
+
+
+def test_v1_1_is_a_data_release_and_keeps_schema_version_1_0() -> None:
+    """D8: tightening a schema does not bump schema_version.
+
+    Bumping the const would invalidate every existing record and falsify the
+    no-migration claim. So records stay "1.0" and the mapping is corrected.
+    """
+    c = load_contract()
+    assert c.version["current"] == "v1.1"
+    entry = [v for v in c.version["versions"] if v["tag"] == "workitem/v1.1"]
+    assert entry, "v1.1 must be declared"
+    assert entry[0]["schema_version"] == "1.0"
+    assert entry[0]["released"] is not None
+
+
+def test_a_contract_data_release_does_not_change_the_schema_version() -> None:
+    """The tag and the schema version are different namespaces.
+
+    Guards the reasoning in D8 so a future minor release cannot silently bump the
+    schema version and break every record.
+    """
+    c = load_contract()
+    declared = c.schema["properties"]["schema_version"]["const"]
+    for entry in c.version["versions"]:
+        if entry["tag"] == c.version["current"]:
+            continue
+        if entry["released"] is None:
+            continue
+        assert entry["schema_version"] == declared, (
+            f"{entry['tag']} is released with schema_version {entry['schema_version']}, "
+            f"but v1.schema.json pins {declared}"
+        )
