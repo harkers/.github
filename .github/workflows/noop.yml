@@ -1,8 +1,0 @@
-name: Noop
-on:
-  workflow_call:
-jobs:
-  noop:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "cross-repo reusable call works"
