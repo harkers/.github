@@ -82,16 +82,23 @@ consumers to take rather than the declared parameter space.
 | D3 | **Skipped states are bypassed by explicit conditional edges**, not by an engine that synthesises them. Every edge stays visible and auditable in the YAML. |
 | D4 | **`branch_only` means committed to a branch, never a PR.** The branch and its commits are real; only the PR machinery is absent. |
 | D5 | **The gate table learns `when: { delivery_mode: ... }`**, mirroring the state machine's existing condition syntax. One mechanism, not two. |
+| D6 | **The reachability invariant spans the full cross product of both parameters**, 12 combinations. `review_policy` has no graph effect today — verified — so it is covered as regression protection rather than because it fixes a live dead end. |
 
 ## 5. Goals and non-goals
 
 ### Goals
 
-1. Every declared state is reachable from `DRAFT` under every delivery mode in which it is not skipped.
-2. Every delivery mode can reach a terminal state.
-3. The graph and the gates agree about what each delivery mode means.
+1. Every declared state is reachable from `DRAFT` under every combination of `delivery_mode` and
+   `review_policy` in which it is not skipped.
+2. Every combination can reach a terminal state.
+3. No reachable state has a gate that is *structurally unsatisfiable* — a gate demanding a field
+   that the active mode forbids.
 4. A record cannot claim a pull request in a mode that forbids one.
 5. Consumers can revert by re-pinning, without a code change.
+
+Invariant 3 is stated separately from 1 and 2 because it is a different kind of failure. 1 and 2
+are about the graph; 3 is about the graph and the gates disagreeing. The `branch_only` defect is
+purely 3 — every state was reachable, and the work could still not be completed.
 
 ### Non-goals
 
@@ -99,7 +106,9 @@ consumers to take rather than the declared parameter space.
 - No new field, no removed field, no record migration.
 - No change to `workhub`, no writer, no CLI.
 - No change to identifier format, review policy, sizing policy, or the event model.
-- Not a general fix for other parameter combinations this change may not have exercised. See §9.
+- Not a fix for any parameter combination beyond `delivery_mode` and `review_policy`.
+  Those two are now exhaustively covered; anything added later is covered automatically
+  by the cross-product test, which enumerates declared values rather than a literal.
 
 ## 6. The fix
 
@@ -163,12 +172,30 @@ No other gate needs it. `COMMITTED` requires `artifacts.commits`, which holds fo
 (commits are real) and is moot for `none` (the state is skipped). `REPORTING` requires a completion
 packet and `DONE` requires passed verification plus a packet — both apply under every mode.
 
-### 6.4 `gates.py`
+### 6.4 Parameter spaces become enumerable
+
+The cross-product test must enumerate declared values rather than hardcode them. `delivery_mode`
+already declares its `values`; `review_policy` does not declare anything about *where* it applies.
+It now says so:
+
+```yaml
+parameters:
+  review_policy:
+    field: verification.review_policy
+    values: [low_risk, normal, security_sensitive, high_risk]
+    affects: gates        # not edges -- selecting which evidence must pass changes no state graph
+```
+
+This is a comment expressed as data. The asymmetry between the two parameters is a real fact — one
+governs edges, the other gates — and stating it means the next reader does not have to infer it, and
+the test can fail loudly if that ever stops being true.
+
+### 6.5 `gates.py`
 
 `check_declared_gates` skips any gate whose `when` does not match the record's `delivery.mode`. A gate
 with no `when` applies unconditionally, exactly as today. The module still embeds no policy literal.
 
-### 6.5 `v1.schema.json`
+### 6.6 `v1.schema.json`
 
 One constraint, so a record cannot contradict its own mode:
 
@@ -223,29 +250,76 @@ run.
 
 ## 8. Tests
 
-The invariant that was missing:
+### 8.1 What was measured before designing this
 
-> **Every declared state is reachable from `DRAFT` under every delivery mode in which it is not
-> skipped, and every mode can reach a terminal state.**
+Reachability and gate satisfiability were computed across the full cross product of both parameters
+(3 delivery modes x 4 review policies = 12 combinations) before this design was written.
 
-Added to `workitem/conformance/tests/`:
+**`review_policy` has no effect on reachability.** Within every mode, all four policies reach exactly
+the same states. It selects *which evidence must have passed*, never *which states exist*. That is the
+asymmetry section 6.4 now declares rather than leaves to be inferred.
 
-| Test | Purpose |
-| --- | --- |
-| `test_every_state_is_reachable_under_every_applicable_mode` | The invariant above. Fails at v1. |
-| `test_every_mode_can_reach_a_terminal_state` | `DONE` reachable under all three modes. Fails at v1 for `none`. |
-| `test_skip_lists_match_the_declared_modes` | Every value in `values` has an entry in `skips_states_by_mode`. |
-| `test_undeclared_mode_skips_nothing` | An unknown mode yields `[]`, not a silent pass or a crash. |
-| `test_gate_with_when_is_skipped_for_other_modes` | `check_declared_gates` honours `when`. Fails at v1. |
-| `test_pr_draft_gate_only_binds_for_pull_request` | The specific incoherence. Fails at v1. |
-| `test_branch_only_record_with_a_pull_request_is_rejected` | Schema constraint. Fails at v1. |
-| `test_none_record_with_a_pull_request_is_rejected` | Schema constraint. Fails at v1. |
-| `test_draft_record_with_a_null_branch_stays_valid` | Guards the v1.1 schema against tightening `branch`. |
-| `test_delivery_mode_conditionals_cannot_match_vacuously` | `delivery` and `mode` are always present. |
-| `test_existing_records_satisfy_the_new_constraints` | Guards the no-migration claim. |
+**So the cross product finds no second live defect.** What it buys is regression protection: a future
+change that made a review policy block a state would be caught, where today nothing would notice.
 
-Four of these fail at v1, which is the evidence they test something real.
+The one structural incoherence it does find is `branch_only` x every policy:
 
+```text
+WITHOUT the fix (gate has no `when`):
+  (branch_only, low_risk,           PR_DRAFT, delivery.pull_request)
+  (branch_only, normal,             PR_DRAFT, delivery.pull_request)
+  (branch_only, security_sensitive, PR_DRAFT, delivery.pull_request)
+  (branch_only, high_risk,          PR_DRAFT, delivery.pull_request)
+
+WITH the fix:  none -- the invariant holds across all 12 combinations
+```
+
+`none` does not appear: `PR_DRAFT` is skipped there, so it is never reachable and cannot carry an
+unsatisfiable gate.
+
+### 8.2 Invariants under test
+
+> **I1** Every declared state is reachable from `DRAFT` under every `(delivery_mode, review_policy)`
+> combination in which it is not skipped.
+>
+> **I2** Every such combination can reach a terminal state.
+>
+> **I3** No reachable state carries a gate that is structurally unsatisfiable -- one demanding a field
+> the active mode forbids.
+
+I3 is stated separately from I1 and I2 because it is a different kind of failure. I1 and I2 are about
+the graph; I3 is about the graph and the gates *disagreeing*. The `branch_only` defect is purely I3:
+every state was reachable, and the work still could not be completed.
+
+I3 is decidable only once the schema constraint exists. That constraint is what turns "the mode
+forbids this field" into a machine-checkable fact rather than a comment -- which is why sections 6.3
+and 6.6 have to land together.
+
+### 8.3 Tests
+
+| Test | Invariant | Fails at v1 |
+| --- | --- | --- |
+| `test_every_state_is_reachable_under_every_applicable_combination` | I1 | yes (`none`, all policies) |
+| `test_every_combination_can_reach_a_terminal_state` | I2 | yes (`none`, all policies) |
+| `test_no_reachable_state_has_an_unsatisfiable_gate` | I3 | yes (`branch_only`, all policies) |
+| `test_parameter_spaces_are_enumerable_from_the_contract` | -- | no (guards the test itself) |
+| `test_review_policy_declares_that_it_affects_gates_not_edges` | -- | no (guards 6.4) |
+| `test_skip_lists_match_the_declared_modes` | -- | yes |
+| `test_undeclared_mode_skips_nothing` | -- | no |
+| `test_gate_with_when_is_skipped_for_other_modes` | -- | yes |
+| `test_branch_only_record_with_a_pull_request_is_rejected` | -- | yes |
+| `test_none_record_with_a_pull_request_is_rejected` | -- | yes |
+| `test_draft_record_with_a_null_branch_stays_valid` | -- | no (guards 6.6 against tightening `branch`) |
+| `test_delivery_mode_conditionals_cannot_match_vacuously` | -- | no |
+| `test_existing_records_satisfy_the_new_constraints` | -- | no (guards the no-migration claim) |
+
+Seven of thirteen fail at v1. The ones that do not are guards on the fix rather than on the defect,
+and they pass today by construction.
+
+`test_parameter_spaces_are_enumerable_from_the_contract` is the one that stops this class of bug
+recurring silently: it asserts the tests read their combinations from the contract's declared
+`values` rather than from a literal. A fourth delivery mode added to `state-machine.yaml` would then
+be covered without touching a test file.
 ## 9. Risks
 
 | Risk | Mitigation |
@@ -257,10 +331,19 @@ Four of these fail at v1, which is the evidence they test something real.
 
 ## 10. Open questions deferred
 
-- Whether `review_policy` needs the same treatment in the gate table. It selects *which* evidence must
-  pass, not *which states are reachable*, so the graph is unaffected — but the two parameters are now
-  both expressed in `policy.yaml` and only one of them lives in `state-machine.yaml`'s parameters. Worth
-  reconciling for symmetry once a second parameter actually needs graph semantics.
+- Whether the `when:` mechanism should be generalised beyond `delivery_mode`. Both parameters use it
+  now, but `review_policy` never needed it for an *edge* condition — only the gate table reads it. A
+  parameter that genuinely affects edges *and* gates would justify a single shared parameter
+  declaration block rather than one per file.
 - Whether `delivery.mode` should gain a fourth value. `none` currently means "no delivery artifacts at
   all", which is right for an investigation but arguably wrong for a documentation change that does
-  commit files. Splitting it would be a new mode, not a fix to this one.
+  commit files. Splitting it would be a new mode, not a fix to this one — and the cross-product test
+  would cover it automatically, which is part of why it is cheap to add later.
+- Whether `execution.resource_class` and `execution.max_attempts` should be declared parameters at all.
+  Neither affects reachability or gates today. If a future change made either gate-relevant, it would
+  need declaring the same way, and `test_parameter_spaces_are_enumerable_from_the_contract` is where
+  that omission would show up.
+- Whether a *fourth* invariant is warranted: that every gate, on every reachable path, is satisfiable
+  by a record that would actually be written. That is stronger than I3, which only asks whether the
+  required field is forbidden by the mode. The full version needs a synthesiser for a valid record per
+  state, which is more machinery than this fix warrants.
