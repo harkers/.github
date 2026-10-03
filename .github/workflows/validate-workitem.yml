@@ -36,7 +36,7 @@ on:
       require-contract-pin:
         description: Fail when contract-ref is not a pinned contract tag.
         required: false
-        default: "true"
+        default: true
         type: boolean
 
 jobs:
