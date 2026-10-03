@@ -1,0 +1,29 @@
+schema: workitem-contract-version
+version: "1.0"
+
+current: v1
+
+# Contract versions are git tags in harkers/.github. Consumers pin a tag and
+# MUST NOT consume an unpinned moving ref. A version with released: null is
+# declared but not yet available; only `current` and later tags may be pinned.
+versions:
+  - tag: workitem/v1
+    schema_version: "1.0"
+    released: "2026-10-03"
+  - tag: workitem/v1.1
+    schema_version: "1.1"
+    released: null
+  - tag: workitem/v2
+    schema_version: "2.0"
+    released: null
+
+resolution:
+  repository: harkers/.github
+  strategy: pinned_git_tag
+  cache:
+    required: true
+    retain_provenance: true
+    provenance_schema: workitem/provenance.schema.json
+  note: >-
+    GitHub default community-file inheritance is not relied upon for schema
+    resolution; WorkHub resolves the contract explicitly.
