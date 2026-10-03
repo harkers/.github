@@ -2,13 +2,18 @@ name: Validate WorkItems
 
 # Reusable validation gate for the canonical WorkItem contract.
 #
-# A consuming repository calls this to prove its WorkItem instances validate
-# against the canonical schema. The contract is fetched from a PINNED tag, never
-# from a moving ref: an unpinned main would let a central change silently
-# invalidate every existing WorkItem in every consumer.
+# A consuming repository calls this to prove its WorkItem instances satisfy the
+# canonical contract. The contract is fetched from a PINNED tag, never from a
+# moving ref: an unpinned main would let a central change silently invalidate
+# every existing WorkItem in every consumer.
 #
 # Contract: harkers/.github workitem/ at tag workitem/v1
-# See harkers/.github workitem/README.md and workitem/contract-version.yaml.
+# See workitem/README.md and workitem/contract-version.yaml.
+#
+# Validation is performed by the contract's own conformance package, which ships
+# inside the pinned tag. This workflow deliberately contains no copy of the rules:
+# a gate with its own inline implementation would be a second definition of the
+# contract, which is the failure mode the contract exists to prevent.
 
 on:
   workflow_call:
@@ -45,6 +50,16 @@ jobs:
       - name: Check out the calling repository
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Installed before anything that imports jsonschema or yaml. The provenance
+      # step below needs both, and GitHub runners do not ship them.
+      - name: Install the validator
+        run: python -m pip install --quiet "jsonschema>=4.21,<5.0" "PyYAML>=6.0,<7.0"
+
       - name: Reject an unpinned contract ref
         if: ${{ inputs.require-contract-pin }}
         run: |
@@ -58,74 +73,83 @@ jobs:
       - name: Fetch the contract at the pinned tag and record provenance
         run: |
           set -euo pipefail
-          SHA=$(git ls-remote "${{ inputs.contract-repo }}" "refs/tags/${{ inputs.contract-ref }}" \
-                | awk '{print $1}' | head -1)
-          if [ -z "$SHA" ]; then
-            echo "::error::tag ${{ inputs.contract-ref }} not found in ${{ inputs.contract-repo }}"
-            exit 1
-          fi
-          git clone --depth 1 --branch "${{ inputs.contract-ref }}" "${{ inputs.contract-repo }}" /tmp/contract
-          # Provenance: a cached contract must always record what it resolved to.
-          CHECKSUM=$(sha256sum /tmp/contract/workitem/v1.schema.json | awk '{print $1}')
-          cat > workitem-contract-provenance.yaml <<EOF
-          repo: ${{ inputs.contract-repo }}
-          requested_ref: ${{ inputs.contract-ref }}
-          resolved_sha: $SHA
-          path: workitem/v1.schema.json
-          contract_version: ${{ inputs.contract-ref }}
-          fetched_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-          checksum: $CHECKSUM
-          EOF
-          cat workitem-contract-provenance.yaml
+          REF="${{ inputs.contract-ref }}"
+          REPO="${{ inputs.contract-repo }}"
+          # git needs a URL. `owner/repo` alone is treated as a local path and the
+          # fetch fails, so derive the clone URL from the API server. The bare
+          # owner/repo pair is what the provenance record records.
+          CLONE_URL="${{ github.server_url }}/${REPO}.git"
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+          # Peel the annotated tag to the COMMIT it points at. `git ls-remote
+          # refs/tags/<tag>` returns the tag object sha, not the commit sha, so
+          # recording that would misidentify the tree actually checked out.
+          git init -q contract
+          git -C contract remote add origin "$CLONE_URL"
+          git -C contract fetch -q --depth 1 origin "refs/tags/$REF:refs/tags/$REF"
+          git -C contract checkout -q "refs/tags/$REF"
 
-      - name: Install the validator
-        run: python -m pip install --quiet "jsonschema>=4.21,<5.0" "PyYAML>=6.0,<7.0"
+          # Written and validated by Python rather than emitted by a heredoc: a
+          # heredoc preserves leading whitespace, and an indented mapping is not
+          # valid YAML at the document root. Writing it here also lets us check it
+          # against the contract's own provenance schema, which the first version
+          # did not -- it emitted a record that violated that schema on every run.
+          python3 - "$REF" "$REPO" <<'PY'
+          import datetime, hashlib, json, pathlib, re, subprocess, sys
 
-      - name: Validate every WorkItem instance
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import glob, json, sys
           import yaml
           from jsonschema import Draft202012Validator
 
-          schema = json.load(open("/tmp/contract/workitem/v1.schema.json"))
-          Draft202012Validator.check_schema(schema)
-          validator = Draft202012Validator(schema)
+          contract = pathlib.Path("contract")
+          ref, repo = sys.argv[1], sys.argv[2]
 
-          paths = sorted(glob.glob("${{ inputs.workitem-glob }}"))
-          if not paths:
-              print("No WorkItem instances matched '${{ inputs.workitem-glob }}'.")
-              print("If this repository holds no WorkItems, remove this gate rather than")
-              print("letting it pass vacuously.")
-              sys.exit(1)
+          commit_sha = subprocess.run(
+              ["git", "-C", str(contract), "rev-parse", "HEAD"],
+              capture_output=True, text=True, check=True,
+          ).stdout.strip()
 
-          failures = 0
-          for path in paths:
-              with open(path) as fh:
-                  item = yaml.safe_load(fh)
-              errors = sorted(validator.iter_errors(item), key=str)
-              if errors:
-                  failures += 1
-                  print(f"::error file={path}::")
-                  for error in errors:
-                      print(f"  {'/'.join(str(p) for p in error.path) or '<root>'}: {error.message}")
-              else:
-                  print(f"ok: {path}")
+          # contract_version comes from the contract itself, not from the ref
+          # string: `workitem/v1` is a tag, and the provenance schema wants `v1`.
+          version_yaml = (contract / "workitem" / "contract-version.yaml").read_text()
+          match = re.search(r"^current:\s*(\S+)", version_yaml, re.M)
+          contract_version = match.group(1) if match else ref
 
-          print(f"\n{len(paths) - failures}/{len(paths)} WorkItems valid.")
-          sys.exit(1 if failures else 0)
+          schema_path = contract / "workitem" / "v1.schema.json"
+          record = {
+              "repo": repo,
+              "requested_ref": ref,
+              "resolved_sha": commit_sha,
+              "path": "workitem/v1.schema.json",
+              "contract_version": contract_version,
+              "fetched_at": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "checksum": hashlib.sha256(schema_path.read_bytes()).hexdigest(),
+          }
+
+          schema = json.loads((contract / "workitem" / "provenance.schema.json").read_text())
+          errors = sorted(Draft202012Validator(schema).iter_errors(record), key=str)
+          if errors:
+              print("::error::provenance record violates the contract's own schema")
+              for error in errors:
+                  print(f"  {error.message}")
+              raise SystemExit(1)
+
+          text = yaml.safe_dump(record, sort_keys=False)
+          pathlib.Path("provenance.yaml").write_text(text)
+          print(text)
+          print("provenance conforms to provenance.schema.json")
           PY
+
+      - name: Validate every WorkItem instance with the contract's own checker
+        run: |
+          set -euo pipefail
+          PYTHONPATH="contract/workitem/conformance" python -m workitem_conformance.cli \
+            --contract-root contract \
+            --ledger-root . \
+            --pattern '${{ inputs.workitem-glob }}'
 
       - name: Upload contract provenance
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: workitem-contract-provenance
-          path: workitem-contract-provenance.yaml
+          path: provenance.yaml
           if-no-files-found: error
