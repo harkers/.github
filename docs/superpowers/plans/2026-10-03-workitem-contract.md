@@ -108,6 +108,10 @@ pythonpath = ["workitem/conformance"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Contract code lives in .py files. Markdown under docs/ and workitem/ only
+# *quotes* code in fenced blocks; ruff 0.16 formats those too, which would
+# rewrite the plan and README without changing a line of executable code.
+extend-exclude = ["docs/", "*.md"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "C4", "UP"]
