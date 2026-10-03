@@ -150,7 +150,6 @@ EXAMPLE_NAMES = ["task", "bug", "feature", "investigation"]
 
 INVALID_FIXTURES = [
     "invalid-mutable-type-in-id",
-    "invalid-unknown-state",
     "invalid-unknown-dependency-type",
     "invalid-unmeasurable-ac",
     "invalid-missing-privacy",
@@ -174,7 +173,7 @@ def test_schema_itself_is_valid() -> None:
 
 def test_every_example_is_listed_on_disk() -> None:
     found = sorted(p.stem for p in (load_contract().root / "workitem" / "examples").glob("*.yaml"))
-    assert found == EXAMPLE_NAMES
+    assert found == sorted(EXAMPLE_NAMES)
 
 
 @pytest.mark.parametrize("fixture", INVALID_FIXTURES)
@@ -193,6 +192,10 @@ def test_missing_contract_root_raises() -> None:
 `invalid-sizing-band-mismatch` is deliberately **absent** from `INVALID_FIXTURES`: a band/token
 disagreement is semantic, not structural, so JSON Schema cannot reject it. Task 3 adds it
 back as a gate assertion instead.
+
+`invalid-unknown-state` is **also absent**, and for the opposite reason: `state` is typed
+`{"type": "string", "minLength": 1}` because the legal set lives in `state-machine.yaml`,
+not in the schema. Task 2 asserts it against the engine.
 
 - [ ] **Step 4: Run the test to verify it fails**
 
@@ -721,6 +724,9 @@ from __future__ import annotations
 
 import itertools
 from dataclasses import replace
+from pathlib import Path
+
+import yaml
 
 from workitem_conformance.contract import load_contract
 from workitem_conformance.transitions import (
@@ -841,6 +847,18 @@ def test_repair_entry_states_are_the_declared_ones() -> None:
     repair = _machine()["repair"]
     for entry in repair["entry_states"]:
         assert engine.declared(entry, repair["state"]), entry
+
+
+def test_an_unknown_state_is_refused() -> None:
+    """The legal state set lives in state-machine.yaml, so the engine is the gate."""
+    import yaml
+
+    engine = _engine()
+    fixture = Path(__file__).parent / "fixtures" / "invalid-unknown-state.yaml"
+    bad = yaml.safe_load(fixture.read_text())
+    assert bad["state"] not in engine.states()
+    assert not engine.check(bad["state"], "READY", _ctx()).legal
+    assert not engine.check("DRAFT", bad["state"], _ctx()).legal
 ```
 
 No test in this module names a state, a terminal set or an edge. Every one reads its
