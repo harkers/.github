@@ -26,6 +26,7 @@ class ContractError(Exception):
 class Contract:
     root: Path
     schema: dict[str, Any]
+    state_machine: dict[str, Any]
     sizing_policy: dict[str, Any]
 
 
@@ -52,6 +53,7 @@ def load_contract(root: Path | None = None) -> Contract:
     return Contract(
         root=base,
         schema=_read_json(base, "workitem/v1.schema.json"),
+        state_machine=_read_yaml(base, "workitem/state-machine.yaml"),
         sizing_policy=_read_yaml(base, "workitem/sizing-policy.yaml"),
     )
 

@@ -31,6 +31,10 @@ extend-exclude = ["docs/", "*.md"]
 select = ["E", "W", "F", "I", "B", "C4", "UP"]
 ignore = ["E501", "B008"]
 
+[tool.ruff.lint.isort]
+# Resolved through pytest's pythonpath, not installed, so ruff cannot infer it.
+known-first-party = ["workitem_conformance"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

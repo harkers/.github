@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 from jsonschema import Draft202012Validator
+
 from workitem_conformance.contract import ContractError, load_contract, load_example
 
 EXAMPLE_NAMES = ["task", "bug", "feature", "investigation"]

@@ -117,6 +117,10 @@ extend-exclude = ["docs/", "*.md"]
 select = ["E", "W", "F", "I", "B", "C4", "UP"]
 ignore = ["E501", "B008"]
 
+[tool.ruff.lint.isort]
+# Resolved through pytest's pythonpath, not installed, so ruff cannot infer it.
+known-first-party = ["workitem_conformance"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
@@ -824,26 +828,35 @@ def test_delivery_mode_none_admits_the_short_circuit_edge() -> None:
         assert engine.check(frm, to, _ctx(delivery_mode="none")).legal
 
 
-def test_repair_state_has_exactly_one_exit_and_it_resumes_execution() -> None:
-    """The contract's own repair topology, read from state-machine.yaml."""
-    machine = _machine()
+def test_repair_state_has_exactly_one_exit_into_the_execution_path() -> None:
+    """The contract's own repair topology, read from state-machine.yaml.
+
+    The repair state also has the wildcard BLOCKED and CANCELLED exits, which
+    every non-terminal state has. What must be unique is the edge back into the
+    execution path, or repair rounds could re-enter execution without recording.
+    """
     engine = _engine()
-    repair = machine["repair"]
+    repair = _machine()["repair"]
     repair_state = repair["state"]
     resume_state = repair["resume_state"]
 
     assert repair_state in engine.states()
     assert resume_state in engine.states()
-    assert list(engine.outgoing(repair_state)) == [resume_state], (
-        f"{repair_state} must have exactly one exit"
-    )
+    wildcard = set(engine.wildcard_targets())
+    specific_exits = set(engine.outgoing(repair_state)) - wildcard
+    assert specific_exits == {resume_state}, f"{repair_state} exits: {specific_exits}"
 
-    leaks = [
-        frm
-        for frm in sorted(engine.states() - engine.terminal_states())
-        if frm != resume_state and engine.declared(frm, resume_state)
-    ]
-    assert not leaks, f"states bypassing {repair_state} on the way to {resume_state}: {leaks}"
+
+def test_only_declared_states_may_enter_execution() -> None:
+    """Repair rounds must be recorded, so the entry points into execution are closed."""
+    engine = _engine()
+    repair = _machine()["repair"]
+    resume_state = repair["resume_state"]
+    predecessors = {frm for frm in engine.states() if engine.declared(frm, resume_state)}
+    assert predecessors == set(repair["execution_entry_states"]), (
+        f"states entering {resume_state}: {sorted(predecessors)}, "
+        f"contract declares {sorted(repair['execution_entry_states'])}"
+    )
 
 
 def test_repair_entry_states_are_the_declared_ones() -> None:
@@ -851,6 +864,23 @@ def test_repair_entry_states_are_the_declared_ones() -> None:
     repair = _machine()["repair"]
     for entry in repair["entry_states"]:
         assert engine.declared(entry, repair["state"]), entry
+
+
+def test_failure_is_reachable_only_from_states_where_execution_has_begun() -> None:
+    engine = _engine()
+    failure = _machine()["failure"]
+    happy = _machine()["states"]["happy_path"]
+
+    for entry in failure["entry_states"]:
+        assert engine.declared(entry, failure["state"]), entry
+    assert engine.declared(failure["state"], failure["resume_state"])
+
+    # A task that fails specification or planning has not failed, it has not begun.
+    before_execution = set(happy[: happy.index(failure["entry_states"][0])])
+    for state in sorted(before_execution):
+        assert not engine.declared(state, failure["state"]), (
+            f"{state} precedes execution and must not be able to fail"
+        )
 
 
 def test_an_unknown_state_is_refused() -> None:
@@ -918,6 +948,30 @@ repair:
   state: CHANGES_REQUIRED
   resume_state: IN_PROGRESS
   entry_states: [VALIDATED, TESTING, REVIEWING, VERIFYING]
+  # The complete set of states that may begin or resume execution. Anything else
+  # reaching IN_PROGRESS would bypass the repair record, which is exactly the
+  # round-count loss this state exists to prevent.
+  execution_entry_states: [READY, CHANGES_REQUIRED]
+
+# Failure entry points. FAILED is reachable only once execution has begun: a
+# task that fails specification or planning has not failed, it has not started.
+# Edges are declared individually under `transitions`; this block is the
+# machine-readable statement of which states those are.
+failure:
+  state: FAILED
+  resume_state: READY
+  resume_requires: recovery_decision
+  entry_states:
+    - IN_PROGRESS
+    - IMPLEMENTED
+    - VALIDATED
+    - COMMITTED
+    - PR_DRAFT
+    - IMPLEMENTATION_COMPLETE
+    - TESTING
+    - REVIEWING
+    - VERIFYING
+    - REPORTING
 
 parameters:
   delivery_mode:
@@ -956,11 +1010,23 @@ transitions:
   - { from: VERIFYING,          to: CHANGES_REQUIRED }
   - { from: CHANGES_REQUIRED,   to: IN_PROGRESS }
 
+  # Failure. Only states from which execution has begun can fail.
+  - { from: IN_PROGRESS,          to: FAILED }
+  - { from: IMPLEMENTED,          to: FAILED }
+  - { from: VALIDATED,            to: FAILED }
+  - { from: COMMITTED,            to: FAILED }
+  - { from: PR_DRAFT,             to: FAILED }
+  - { from: IMPLEMENTATION_COMPLETE, to: FAILED }
+  - { from: TESTING,              to: FAILED }
+  - { from: REVIEWING,            to: FAILED }
+  - { from: VERIFYING,            to: FAILED }
+  - { from: REPORTING,            to: FAILED }
+  - { from: FAILED,               to: READY }
+
   # Exceptional.
-  - { from: "*",  to: BLOCKED,          when: { source_not_terminal: true } }
-  - { from: BLOCKED,          to: READY }
-  - { from: FAILED,           to: READY }
-  - { from: "*",  to: CANCELLED,       when: { source_not_terminal: true } }
+  - { from: "*", to: BLOCKED,   when: { source_not_terminal: true } }
+  - { from: BLOCKED,            to: READY }
+  - { from: "*", to: CANCELLED, when: { source_not_terminal: true } }
 ```
 
 - [ ] **Step 4: Write the engine**
@@ -1088,8 +1154,10 @@ class TransitionEngine:
         if frm in self._terminal:
             return Verdict(False, f"{frm} is terminal")
 
+        # A state the contract skips under this delivery mode is unreachable under
+        # it, whether the edge into it was unconditional, conditional or wildcard.
         skipped = self.skipped_by_delivery_mode(ctx.delivery_mode)
-        if to in skipped and (frm, to) not in self._declared:
+        if to in skipped:
             return Verdict(False, f"{to} is unreachable under delivery.mode={ctx.delivery_mode}")
 
         for cfrm, cto, when in self._conditional:
