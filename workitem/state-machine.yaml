@@ -1,0 +1,119 @@
+schema: workitem-state-machine
+version: "1.0"
+
+# Sole definition of the WorkItem lifecycle. Downstream repositories and code
+# load this file; nothing restates it. See
+# docs/superpowers/specs/2026-10-03-workitem-contract-design.md section 7.
+
+states:
+  happy_path:
+    - DRAFT
+    - SPEC_READY
+    - PLAN_READY
+    - READY
+    - IN_PROGRESS
+    - IMPLEMENTED
+    - VALIDATED
+    - COMMITTED
+    - PR_DRAFT
+    - IMPLEMENTATION_COMPLETE
+    - TESTING
+    - REVIEWING
+    - VERIFYING
+    - REPORTING
+    - PR_READY
+    - DONE
+  exceptional:
+    - BLOCKED
+    - FAILED
+    - CANCELLED
+    - CHANGES_REQUIRED
+
+terminal: [DONE, CANCELLED]
+
+# The contract states its own repair topology so downstream checks do not have
+# to hard-code it. CHANGES_REQUIRED is a real state, not an implicit edge back
+# to IN_PROGRESS, so repair rounds survive into the event stream.
+repair:
+  state: CHANGES_REQUIRED
+  resume_state: IN_PROGRESS
+  entry_states: [VALIDATED, TESTING, REVIEWING, VERIFYING]
+  # The complete set of states that may begin or resume execution. Anything else
+  # reaching IN_PROGRESS would bypass the repair record, which is exactly the
+  # round-count loss this state exists to prevent.
+  execution_entry_states: [READY, CHANGES_REQUIRED]
+
+# Failure entry points. FAILED is reachable only once execution has begun: a
+# task that fails specification or planning has not failed, it has not started.
+# Edges are declared individually under `transitions`; this block is the
+# machine-readable statement of which states those are.
+failure:
+  state: FAILED
+  resume_state: READY
+  resume_requires: recovery_decision
+  entry_states:
+    - IN_PROGRESS
+    - IMPLEMENTED
+    - VALIDATED
+    - COMMITTED
+    - PR_DRAFT
+    - IMPLEMENTATION_COMPLETE
+    - TESTING
+    - REVIEWING
+    - VERIFYING
+    - REPORTING
+
+parameters:
+  delivery_mode:
+    field: delivery.mode
+    values: [pull_request, branch_only, none]
+    default: pull_request
+    # States unreachable when the WorkItem produces no branch or PR.
+    skips_states: [COMMITTED, PR_DRAFT, IMPLEMENTATION_COMPLETE, PR_READY]
+
+transitions:
+  # Happy path, in order.
+  - { from: DRAFT,              to: SPEC_READY }
+  - { from: SPEC_READY,         to: PLAN_READY }
+  - { from: PLAN_READY,         to: READY }
+  - { from: READY,              to: IN_PROGRESS }
+  - { from: IN_PROGRESS,        to: IMPLEMENTED }
+  - { from: IMPLEMENTED,        to: VALIDATED }
+  - { from: VALIDATED,          to: COMMITTED }
+  - { from: COMMITTED,          to: PR_DRAFT }
+  - { from: PR_DRAFT,           to: IMPLEMENTATION_COMPLETE }
+  - { from: IMPLEMENTATION_COMPLETE, to: TESTING }
+  - { from: TESTING,            to: REVIEWING }
+  - { from: REVIEWING,          to: VERIFYING }
+  - { from: VERIFYING,          to: REPORTING }
+  - { from: REPORTING,          to: PR_READY }
+  - { from: PR_READY,           to: DONE }
+
+  # delivery.mode = none short-circuits the delivery states.
+  - { from: VALIDATED,          to: TESTING,        when: { delivery_mode: none } }
+
+  # Repair loops. The round count survives into the event stream because
+  # CHANGES_REQUIRED is a real state, not an implicit edge back to IN_PROGRESS.
+  - { from: VALIDATED,          to: CHANGES_REQUIRED }
+  - { from: TESTING,            to: CHANGES_REQUIRED }
+  - { from: REVIEWING,          to: CHANGES_REQUIRED }
+  - { from: VERIFYING,          to: CHANGES_REQUIRED }
+  - { from: CHANGES_REQUIRED,   to: IN_PROGRESS }
+
+  # Failure. Only states from which execution has begun can fail.
+  - { from: IN_PROGRESS,          to: FAILED }
+  - { from: IMPLEMENTED,          to: FAILED }
+  - { from: VALIDATED,            to: FAILED }
+  - { from: COMMITTED,            to: FAILED }
+  - { from: PR_DRAFT,             to: FAILED }
+  - { from: IMPLEMENTATION_COMPLETE, to: FAILED }
+  - { from: TESTING,              to: FAILED }
+  - { from: REVIEWING,            to: FAILED }
+  - { from: VERIFYING,            to: FAILED }
+  - { from: REPORTING,            to: FAILED }
+  - { from: FAILED,               to: READY }
+
+  # Exceptional.
+  - { from: "*", to: BLOCKED,   when: { source_not_terminal: true } }
+  - { from: BLOCKED,            to: READY }
+  - { from: "*", to: CANCELLED, when: { source_not_terminal: true } }

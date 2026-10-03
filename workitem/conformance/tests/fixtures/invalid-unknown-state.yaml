@@ -1,0 +1,90 @@
+schema: workitem
+schema_version: "1.0"
+id: WI-20261003-0001
+
+identity:
+  type: TASK
+  title: "Implement task dependency resolver"
+  description: "Implement dependency resolution for runnable WorkItems."
+
+hierarchy:
+  epic: foundation
+  parent: null
+
+source:
+  type: user_request
+  issue: 13
+  requested_by: user
+  created_by: workhub
+
+priority: HIGH
+state: NOT_A_STATE
+
+scope:
+  allowed_paths: ["src/workhub/domain/", "tests/domain/"]
+  denied_paths: ["src/workhub/config/"]
+
+privacy:
+  level: INTERNAL
+  network: allowed
+
+delivery:
+  mode: pull_request
+  branch: null
+  pull_request: null
+
+execution:
+  worker_role: builder-primary
+  capability: builder
+  preferred_model: qwen3-coder-next
+  resource_class: auto
+  max_attempts: 3
+
+dependencies:
+  - target: WI-20261003-0002
+    type: OPTIONAL
+
+acceptance_criteria:
+  - id: AC-001
+    description: "Blocked tasks must not become runnable"
+    status: pending
+    verification_method: command
+    expected: "pytest tests/domain/test_resolver.py exits 0"
+
+verification:
+  review_policy: normal
+  required: [tests, local_review, cloud_review]
+  tests:
+    status: pending
+    evidence: []
+  local_review:
+    status: pending
+    evidence: []
+  cloud_review:
+    status: pending
+    evidence: []
+  specialist_review:
+    status: not_applicable
+    evidence: []
+
+sizing:
+  estimated_complexity: MEDIUM
+  estimated_context_tokens: 12000
+
+artifacts:
+  specification: null
+  implementation_plan: null
+  commits: []
+  completion_packet: null
+
+attempts: []
+
+completion:
+  status: incomplete
+  packet: null
+
+timestamps:
+  created_at: null
+  updated_at: null
+  started_at: null
+  completed_at: null
