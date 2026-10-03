@@ -1,0 +1,97 @@
+schema: workitem-migration
+from: "0.9"
+to: "1.0"
+id: 2026-10-03-adopt-contract-v1
+description: >-
+  Adopts WorkHub's temporary .workhub/workitems compatibility protocol
+  (harkers/workhub f5baf73) to contract v1.
+
+  The compatibility protocol shipped records that declared schema_version 1.0
+  while carrying a 17-field shape. Contract v1 is the 20-field shape. Rather
+  than let two shapes share a version string, the protocol shape is treated as
+  0.9 and migrated here.
+
+  delivery is derivable from data the protocol already captured. scope and
+  privacy are NOT derivable and MUST NOT be defaulted: a defaulted privacy
+  level would silently widen the confidentiality boundary, which is the one
+  mistake this migration exists to avoid. Those two steps use `require`, so the
+  migration fails loudly and a human sets them.
+
+steps:
+  # --- derivable: promote artifacts' delivery fields to the delivery block ---
+  - id: derive-delivery-mode
+    target: delivery.mode
+    transform: derive
+    from:
+      branch: artifacts.branch
+      pull_request: artifacts.pull_request
+    rule: pull_request_if_any
+    note: >-
+      mode is pull_request when a pull_request or branch was captured,
+      branch_only when only a branch was, none when neither was.
+
+  - id: move-branch
+    target: delivery.branch
+    transform: rename
+    from: artifacts.branch
+
+  - id: move-pull-request
+    target: delivery.pull_request
+    transform: rename
+    from: artifacts.pull_request
+    coerce: url_to_number
+
+  - id: add-delivery-skeleton
+    target: delivery
+    transform: set_default
+    value: { mode: null, branch: null, pull_request: null }
+    when_absent: true
+    order: first
+
+  # --- not derivable: a human must decide these ---
+  - id: require-scope
+    target: scope
+    transform: require
+    reason: >-
+      The compatibility protocol captured no path allowlist. scope bounds what a
+      WorkItem may touch; guessing one would widen the blast radius of a
+      mis-scoped change. A human sets scope.allowed_paths from the WorkItem's
+      title, description and touched files.
+
+  - id: require-privacy
+    target: privacy
+    transform: require
+    reason: >-
+      The compatibility protocol captured no privacy level. Defaulting it would
+      be the single most dangerous step in this migration: a WorkItem that
+      actually touches client-confidential material would be recorded as
+      INTERNAL and could then be dispatched to a cloud model. A human sets
+      privacy.level, defaulting to the most restrictive level that is true.
+
+  # --- cleanup of fields v1 does not carry at that location ---
+  - id: drop-artifacts-worktree
+    target: artifacts.worktree
+    transform: drop
+    reason: >-
+      v1 keeps worktree out of artifacts; a branch name is enough to locate the
+      worktree, and two fields for one fact is one more thing to drift.
+
+  - id: drop-artifacts-branch
+    target: artifacts.branch
+    transform: drop
+    reason: moved to delivery.branch
+
+  - id: drop-artifacts-pull-request
+    target: artifacts.pull_request
+    transform: drop
+    reason: moved to delivery.pull_request
+
+# Records this migration has been applied to, for audit. Not consumed by the
+# migration engine.
+applied_to:
+  - id: WI-20261003-0001
+    note: "Issue #11, DONE, PR #22"
+  - id: WI-20261003-0002
+    note: "Issue #12, DONE, PR #37"
+  - id: WI-20261003-0003
+    note: "Issue #13, PR_DRAFT, PR #40"

@@ -10,12 +10,24 @@ versions:
   - tag: workitem/v1
     schema_version: "1.0"
     released: "2026-10-03"
+    supersedes: "0.9"
   - tag: workitem/v1.1
     schema_version: "1.1"
     released: null
   - tag: workitem/v2
     schema_version: "2.0"
     released: null
+
+# Version 0.9 is the pre-contract shape, not a released contract version. It is
+# recorded here because records exist in the wild that label themselves 1.0 while
+# carrying the 17-field shape. Two shapes must never share a version number, so
+# 0.9 is the correct name for them and v1 supersedes it.
+pre_contract:
+  - version: "0.9"
+    description: >-
+      harkers/workhub's temporary .workhub/workitems compatibility protocol
+      (commit f5baf73). Labelled itself schema_version 1.0.
+    migration: workitem/migrations/v0.9-to-v1.yaml
 
 resolution:
   repository: harkers/.github
