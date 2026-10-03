@@ -28,6 +28,15 @@ on:
         required: false
         default: harkers/.github
         type: string
+      gate-ref:
+        description: >-
+          Tag holding the conformance checker. Separate from contract-ref on
+          purpose: the checker and the contract data change for different reasons,
+          and coupling them forces a contract release whenever a checker bug is
+          fixed. Left unset, falls back to contract-ref.
+        required: false
+        default: ""
+        type: string
       workitem-glob:
         description: Path pattern for WorkItem instances in the calling repository.
         required: false
@@ -75,6 +84,8 @@ jobs:
           set -euo pipefail
           REF="${{ inputs.contract-ref }}"
           REPO="${{ inputs.contract-repo }}"
+          GATE_REF="${{ inputs.gate-ref }}"
+          if [ -z "$GATE_REF" ]; then GATE_REF="$REF"; fi
           # git needs a URL. `owner/repo` alone is treated as a local path and the
           # fetch fails, so derive the clone URL from the API server. The bare
           # owner/repo pair is what the provenance record records.
@@ -87,6 +98,24 @@ jobs:
           git -C contract remote add origin "$CLONE_URL"
           git -C contract fetch -q --depth 1 origin "refs/tags/$REF:refs/tags/$REF"
           git -C contract checkout -q "refs/tags/$REF"
+
+          # The checker may be pinned independently of the contract data. When it
+          # is, fetch it separately; otherwise the contract tree already has it.
+          CHECKER="contract/workitem/conformance"
+          if [ "$GATE_REF" != "$REF" ]; then
+            git init -q checker
+            git -C checker remote add origin "$CLONE_URL"
+            git -C checker fetch -q --depth 1 origin "refs/tags/$GATE_REF:refs/tags/$GATE_REF"
+            git -C checker checkout -q "refs/tags/$GATE_REF"
+            CHECKER="checker/workitem/conformance"
+            echo "checker pinned separately at $GATE_REF"
+          fi
+          test -f "$CHECKER/workitem_conformance/cli.py" || {
+            echo "::error::no conformance checker at $CHECKER"
+            echo "The contract tag predates the checker. Pin gate-ref to a tag that has it."
+            exit 1
+          }
+          echo "CHECKER_PATH=$CHECKER" >> "$GITHUB_ENV"
 
           # Written and validated by Python rather than emitted by a heredoc: a
           # heredoc preserves leading whitespace, and an indented mapping is not
@@ -141,7 +170,7 @@ jobs:
       - name: Validate every WorkItem instance with the contract's own checker
         run: |
           set -euo pipefail
-          PYTHONPATH="contract/workitem/conformance" python -m workitem_conformance.cli \
+          PYTHONPATH="$CHECKER_PATH" python -m workitem_conformance.cli \
             --contract-root contract \
             --ledger-root . \
             --pattern '${{ inputs.workitem-glob }}'
