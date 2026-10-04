@@ -163,6 +163,28 @@ One rule, applied twice:
   WorkItem that is itself `DONE`. Discharge is compositional: it is always
   traceable to real completed work.
 
+### Why the rule is sound, and what it costs
+
+Two properties make `DONE`-only satisfaction coherent rather than merely strict.
+
+**Monotonicity.** `DONE` and `CANCELLED` are terminal sinks, so a satisfied
+dependency can never be revoked. An honest `DONE` record cannot later become
+flagged, and no satisfied edge flips back to unsatisfied as the ledger evolves.
+What actually discriminates between the two candidate rules is blast radius, not
+monotonicity: `CANCELLED` is the routine hygiene action, `DONE` is the rare
+load-bearing one. Letting the routine action un-block dependents would turn
+cancellation into completion-preserving graph surgery — one cancel re-permits 11
+records in the measured fan-in.
+
+**The exit is genuine, but not free.** A dependent of a cancelled WorkItem has
+three honest moves: re-point the dependency (legal — `immutable_after` freezes only
+`acceptance_criteria`), cancel itself, or sit in `BLOCKED`. None is a trap. The
+cost is that cancelling is *cheap to do and expensive to undo* — `CANCELLED` has no
+path back, so a mis-cancelled record needs a fresh WorkItem id. That is the real
+risk of this design, and it is why a per-edge waiver should be a considered later
+step rather than a convenience. Strict-then-loosen is the safe order: you cannot
+tighten again after dependents have leaned on the looseness.
+
 ### Why `CANCELLED` does not satisfy a dependency
 
 `CANCELLED` is the fork, and getting it wrong reintroduces the #8 bug class.
@@ -179,6 +201,18 @@ The invariant:
 
 > For every record, at least one terminal state is reachable. `DONE` is
 > reachable if and only if every dependency is `DONE`.
+
+Stated honestly, the first half is close to vacuous: because `CANCELLED` is
+reachable from every non-terminal state unconditionally, *at least one* terminal
+state is trivially reachable in every ledger, whatever the dependency shape. The
+load-bearing content is the second half — `DONE` reachable iff every dependency is
+`DONE` — and that is what the plan's tests actually assert.
+
+The corollary is that this is a property of the **state machine**, not of the
+dependency graph: it rests on one wildcard edge plus the *absence* of a
+`required_before` entry for any exceptional state. Two one-line edits to
+`policy.yaml` or `state-machine.yaml` would make it false, so
+`test_antitrap_invariant.py` pins both preconditions and fails if either is removed.
 
 Nothing is ever stuck. The only thing forbidden is finishing on the strength of
 work that was abandoned.
@@ -211,9 +245,21 @@ parameter-space test: it must now enumerate ledgers, including synthetic ones
 containing cycles, self-loops, and wide fan-in.
 
 `test_dependency_coverage.py:45` asserts the `target` pattern is *still*
-`^WI-...$`; it is written to fail loudly when this issue is fixed, and is
-expected to be flipped as part of that work. Its four rejected-spelling cases
-are retained — they remain invalid.
+`^WI-...$`, and its four rejected-spelling cases remain valid. Both are **retained
+as deliberate invariants, not flipped.**
+
+An earlier draft of this section predicted that assertion would fail when #4 was
+fixed and would need updating. That prediction was written for the rejected
+polymorphic and union designs, and it is false for the design actually adopted.
+Approach B leaves `dependencies[].target` pattern-locked and puts external
+references in a separate field, so nothing about that assertion changes. Cloud
+review caught the contradiction: the test does not fail, and a future maintainer
+"repairing" it by widening the pattern would undo the approach-B decision recorded
+above and reopen the invariant this spec spends its Decisions section defending.
+
+The coverage tests are therefore now permanent: they pin that a dependency target
+stays a WorkItem id, and that no spelling of a cross-repo reference is accepted in
+that field. External references belong in `external_dependencies[]`.
 
 ## Versioning
 

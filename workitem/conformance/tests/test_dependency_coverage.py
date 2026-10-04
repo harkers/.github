@@ -36,10 +36,12 @@ def test_the_fixture_is_itself_a_valid_workitem() -> None:
 
 
 def test_no_dependency_form_can_name_an_external_issue() -> None:
-    """Documents the gap: every `target` must be a WorkItem id.
+    """Permanent invariant, not a temporary gap: a dependency target is a WorkItem id.
 
-    This assertion is expected to change when #4 is fixed. It should fail then,
-    not silently pass.
+    #4 was fixed by adding a separate external_dependencies[] field, deliberately
+    leaving this pattern alone. Do not "fix" this test by widening the pattern --
+    cross-repo references belong in external_dependencies[], and widening this
+    would make every consumer's target ambiguous between the two kinds.
     """
     schema = load_contract().schema
     target = schema["properties"]["dependencies"]["items"]["properties"]["target"]
@@ -59,12 +61,18 @@ def test_an_external_reference_is_rejected_by_the_schema() -> None:
     assert errors, "an external issue reference was accepted as a dependency target"
 
 
-def test_the_blockage_is_only_recorded_in_prose() -> None:
-    """The fixture's own record of the blockage is untyped and unresolvable.
+def test_the_v1_blockage_is_only_recorded_in_prose() -> None:
+    """The v1 fixture's own record of the blockage is untyped and unresolvable.
 
     Nothing in the WorkItem's structure marks this as blocking, so a scheduler
-    traversing `dependencies` would treat the item as unblocked. That is the
-    defect #4 describes, expressed as an executable claim.
+    traversing `dependencies` would treat the item as unblocked. That was the
+    defect #4 described.
+
+    It stays true of *v1*, which is the point: v2 gives this record somewhere
+    structural to put the reference (external_dependencies), but does not rewrite
+    v1 records. A migrated record carries an empty external_dependencies[] until a
+    human moves the reference across, because the migration must not guess which
+    WorkItem discharges it.
     """
     item = _fixture()
     assert item["dependencies"] == [{"target": "WI-20261003-0001", "type": "REQUIRES"}]

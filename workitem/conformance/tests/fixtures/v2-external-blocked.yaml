@@ -1,0 +1,106 @@
+# A v2 WorkItem blocked by work in another repository.
+#
+# Demonstrates external_dependencies: the reference is structural rather than
+# prose, and it is discharged by a WorkItem in this ledger rather than by an
+# assertion. OPTIONAL is shown alongside REQUIRES to record that no relation
+# type is informational under this contract.
+#
+# Derived from examples/task.yaml. It cannot live in examples/ yet:
+# contract-version.yaml still has current: v1.1, that directory is v1-shaped,
+# and a v2 record there would fail the v1 gate running on main. It moves when
+# v2 is cut.
+schema: workitem
+schema_version: '2.0'
+id: WI-20261004-0042
+identity:
+  type: INVESTIGATION
+  title: Record the WorkHub control-plane provider decision
+  description: Blocked on harkers/workhub#27 landing the provider plan. The reference cannot
+    be verified from this repository, so it is discharged by a WorkItem in this ledger that
+    records the decision, rather than by an assertion that a pull request merged.
+hierarchy:
+  epic: foundation
+  parent: null
+source:
+  type: github_issue
+  issue: 4
+  requested_by: stu
+  created_by: stu
+priority: HIGH
+state: DRAFT
+scope:
+  allowed_paths:
+  - src/workhub/domain/
+  - tests/domain/
+  denied_paths:
+  - src/workhub/config/
+privacy:
+  level: INTERNAL
+  network: allowed
+delivery:
+  mode: branch_only
+  branch: docs/external-dependency-example
+  pull_request: null
+execution:
+  worker_role: builder-primary
+  capability: builder
+  preferred_model: qwen3-coder-next
+  resource_class: auto
+  max_attempts: 3
+dependencies:
+- target: WI-20261004-0041
+  type: REQUIRES
+acceptance_criteria:
+- id: AC-001
+  description: Blocked tasks must not become runnable
+  status: pending
+  verification_method: command
+  expected: pytest tests/domain/test_resolver.py exits 0
+verification:
+  review_policy: normal
+  required:
+  - tests
+  - local_review
+  - cloud_review
+  tests:
+    status: pending
+    evidence: []
+  local_review:
+    status: pending
+    evidence: []
+  cloud_review:
+    status: pending
+    evidence: []
+  specialist_review:
+    status: not_applicable
+    evidence: []
+sizing:
+  estimated_complexity: MEDIUM
+  estimated_context_tokens: 12000
+artifacts:
+  specification: null
+  implementation_plan: null
+  commits: []
+  completion_packet: null
+attempts: []
+completion:
+  status: incomplete
+  packet: null
+timestamps:
+  created_at: null
+  updated_at: null
+  started_at: null
+  completed_at: null
+external_dependencies:
+- repo: harkers/workhub
+  number: 27
+  type: REQUIRES
+  resolved_by: WI-20261004-0043
+  note: 'WI-20261004-0043 records the provider decision once #27 lands. Naming a WorkItem
+    rather than a commit keeps the discharge checkable by the ledger checker.'
+- repo: harkers/.github
+  number: 15
+  type: OPTIONAL
+  resolved_by: WI-20261004-0044
+  note: 'OPTIONAL is not informational in this contract: every relation type requires discharge.
+    Resolved anyway, because leaving it open would block DONE.'

@@ -104,7 +104,8 @@ def insert_into_list(items, anchor, value):
     return out
 
 
-def main() -> int:
+def derive() -> str:
+    """Return v2.schema.json as text, derived from v1.schema.json."""
     schema = json.loads(SRC.read_text(), object_pairs_hook=collections.OrderedDict)
 
     # The identity of the schema changes with the major. Leaving $id pointing at
@@ -124,8 +125,18 @@ def main() -> int:
         schema["required"], "dependencies", "external_dependencies"
     )
 
-    DST.write_text(json.dumps(schema, indent=2, ensure_ascii=False) + "\n")
-    print(f"wrote {DST.relative_to(ROOT)}")
+    return json.dumps(schema, indent=2, ensure_ascii=False) + "\n"
+
+
+def main(out: pathlib.Path | None = None) -> int:
+    target = out or DST
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(derive())
+    try:
+        shown = target.relative_to(ROOT)
+    except ValueError:
+        shown = target
+    print(f"wrote {shown}")
     return 0
 
 

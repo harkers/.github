@@ -1328,7 +1328,32 @@ Run: `cd workitem/conformance && PYTHONPATH=. python -m pytest -q`
 
 Expected: all pass.
 
-- [ ] **Step 7: Merge, then tag — in that order**
+- [ ] **Step 7: Fix the provenance schema path (#18)**
+
+**Must happen before the tag is cut.** `.github/workflows/validate-workitem.yml:145,150,153` hardcode
+`workitem/v1.schema.json`. Once v2 is current, the checker validates against
+`v2.schema.json` while the uploaded provenance artifact — the audit-grade record of
+*which schema validated these records* — names the v1 file and its checksum. The
+record would read `contract_version: v2, path: workitem/v1.schema.json` and be
+internally contradictory. `provenance.schema.json` requires only `minLength: 1`
+for `path`, so it passes its own validation.
+
+Resolve it the way the checker does, from the manifest entry for `current`:
+
+```bash
+grep -n 'schema_path = contract\|"path": "workitem/' .github/workflows/validate-workitem.yml
+```
+
+Replace the hardcoded path with a lookup of the `current` entry's `schema_version`
+major, plus an assertion that the resolved file exists so a bad resolution fails
+loudly rather than checksumming a missing path. Do not import the checker's private
+`_schema_filename` — a workflow reaching into a private symbol is the coupling
+F2 flagged in the derive tool.
+
+Add this to the Verification Checklist below as well, so the check is part of the
+release verification and not only a task step.
+
+- [ ] **Step 8: Merge, then tag — in that order**
 
 Merge the contract PR first. Tags point at merged commits, so tagging before the merge produces a tag no release ever consumed.
 
@@ -1349,7 +1374,7 @@ that broke consumers' required status-check contexts in v4."
 git push origin workitem-gate/v5
 ```
 
-- [ ] **Step 8: Re-pin the consumer**
+- [ ] **Step 9: Re-pin the consumer**
 
 In `harkers/workhub/.github/workflows/validate-workitems.yml`:
 
@@ -1359,7 +1384,7 @@ In `harkers/workhub/.github/workflows/validate-workitems.yml`:
 
 **Keep the job name exactly `Validate WorkItems`.** The required status-check context on `harkers/workhub:main` is `Validate WorkItems / Validate WorkItems`. Renaming the job re-blocks `main`, and the failure will look like a flaky check rather than a configuration coupling.
 
-- [ ] **Step 9: Verify the consumer gate green on `main`**
+- [ ] **Step 10: Verify the consumer gate green on `main`**
 
 ```bash
 gh api "repos/harkers/workhub/actions/runs?branch=main&per_page=1" \
@@ -1368,7 +1393,7 @@ gh api "repos/harkers/workhub/actions/runs?branch=main&per_page=1" \
 
 Expected: `success`. Only then merge the consumer PR.
 
-- [ ] **Step 10: Close #4**
+- [ ] **Step 11: Close #4**
 
 ```bash
 gh issue close 4 --repo harkers/.github --reason completed
@@ -1376,7 +1401,7 @@ gh issue close 4 --repo harkers/.github --reason completed
 
 Comment with the measured blast radius, the migration name, and the rollback pair. Do not restate the `dag-scheduler`, `of_type` or sentinel-deadlock claims — the spec corrects them.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add workitem/contract-version.yaml workitem/README.md tools/migrate_examples_to_v2.py \
@@ -1406,7 +1431,13 @@ PYTHONPATH=workitem/conformance .venv/bin/python -m pytest workitem/conformance 
 PYTHONPATH=workitem/conformance .venv/bin/python -m pytest \
   workitem/conformance/tests/test_dependency_reachability.py -v
 
-# 3. Both schema files exist and the internal pattern is unchanged.
+# 3. The provenance artifact names the schema that actually validated.
+#    (#18 -- before any consumer pins v2 the path was hardcoded to v1.schema.json.)
+gh run list --repo harkers/workhub --workflow="Validate WorkItems" --limit 1 \
+  --json databaseId -q '.[0].databaseId' | xargs -I{} gh api \
+  repos/harkers/workhub/actions/runs/{}/artifacts -q '.artifacts[].name'
+
+# 4. Both schema files exist and the internal pattern is unchanged.
 python3 -c "
 import json
 for m in ('v1','v2'):

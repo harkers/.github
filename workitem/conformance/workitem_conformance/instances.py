@@ -29,7 +29,17 @@ EXTERNAL_REF = re.compile(r"^(?!\d)(?!WI-).+")
 
 
 def find_cycles(dep_map: dict[str, list[str]]) -> list[list[str]]:
-    """Return every cycle in the dependency graph, each as a node list.
+    """Return one representative cycle per DFS back edge, each as a node list.
+
+    This is *not* an exhaustive enumeration. A graph can hold more cycles than this
+    returns: in {a: [b, c], b: [c], c: [a]} both a->b->c->a and a->c->a are cycles,
+    and only the first is reported, because the a->c->a closing edge is examined
+    after c has already been marked done.
+
+    Exhaustive enumeration is unnecessary here. An acyclic graph has no back edge,
+    so `find_cycles(...) == []` is a sound acyclicity verdict in both directions --
+    which is the only question the ledger check asks. The per-cycle count should
+    not be read as a count of cycles.
 
     Iterative rather than recursive: a 5000-deep chain is realistic once a ledger
     grows, and recursion would exhaust the stack on a graph that is merely deep.
@@ -59,7 +69,8 @@ def find_cycles(dep_map: dict[str, list[str]]) -> list[list[str]]:
                     continue
                 if marks[child] == ON_PATH:
                     cycle = path[on_path_index[child] :] + [child]
-                    # The same cycle is reachable from each of its nodes; report it once.
+                    # A duplicate edge can close the same cycle twice within one
+                    # tree; collapse on the node set rather than record it twice.
                     signature = frozenset(cycle)
                     if signature not in seen_signatures:
                         seen_signatures.add(signature)
@@ -267,6 +278,11 @@ def check_ledger(
     }
 
     def unmet_targets(item: dict[str, Any]) -> list[str]:
+        # A target absent from the ledger is reported here as unmet as well as by
+        # unresolved-dependency above. That double report is deliberate: such a
+        # record genuinely violates two rules -- its edge does not resolve, and it
+        # cannot be DONE while waiting on something that does not exist. The cycle
+        # check does not do this, because a dangling edge is only ever one defect.
         internal = [
             edge.get("target")
             for edge in item.get("dependencies") or []
