@@ -143,17 +143,21 @@ conformance checker that validates against it.
 
 | Contract | Gate | Notes |
 |---|---|---|
-| `workitem/v2` | `workitem-gate/v5` | current |
+| `workitem/v2.1` | `workitem-gate/v5` | **current** — pin this |
+| `workitem/v2` | `workitem-gate/v5` | superseded immediately; its `v1-to-v2.yaml` never set `schema_version`, so a record migrated with it still fails v2 |
 | `workitem/v1.1` | `workitem-gate/v4` | previous |
 | `workitem/v1` | `workitem-gate/v2` | first stable contract |
 | — | `workitem-gate/v1` | **broken**: quoted `"true"` under a `boolean` workflow input |
 
-Rolling back within the v1 line is a pin change. Rolling back **from v2** is not:
-`external_dependencies` is a required field, so v1-shaped records do not validate
-against v2 and a v2-shaped record does not validate against v1. Use
-`migrations/v1-to-v2.yaml` — its single step adds `external_dependencies: []`,
-which is faithful rather than a placeholder, because v1 could not express an
-external dependency at all.
+Rolling back within the v1 line is a pin change. Rolling back **from the v2 line**
+is not: `external_dependencies` is a required field, so v1-shaped records do not
+validate against v2 and a v2-shaped record does not validate against v1.
+
+Use `migrations/v1-to-v2.yaml`. It takes two steps: `set` `schema_version` to
+`2.0`, and `set_default` `external_dependencies` to `[]`. The empty list is
+faithful rather than a placeholder — v1 could not express an external dependency
+at all, so there is nothing to convert. The version step is not optional: without
+it a migrated record still fails validation, which is how `workitem/v2` shipped.
 
 Rolling back the checker alone (`gate-ref`) is safe at any time: the checker
 validates records, it does not change their shape. Keep the caller job name
