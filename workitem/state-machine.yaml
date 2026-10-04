@@ -128,9 +128,11 @@ transitions:
   - { from: REVIEWING,            to: FAILED }
   - { from: VERIFYING,            to: FAILED }
   - { from: REPORTING,            to: FAILED }
-  - { from: FAILED,               to: READY }
+  # Guarded for the same reason as REVIEWING -> READY: a record that has claimed
+  # completed work must not reach READY by another route. See harkers/.github#40.
+  - { from: FAILED,               to: READY,   when: { no_criterion_met: true } }
 
   # Exceptional.
   - { from: "*", to: BLOCKED,   when: { source_not_terminal: true } }
-  - { from: BLOCKED,            to: READY }
+  - { from: BLOCKED,             to: READY,   when: { no_criterion_met: true } }
   - { from: "*", to: CANCELLED, when: { source_not_terminal: true } }
