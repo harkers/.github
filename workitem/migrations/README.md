@@ -75,3 +75,4 @@ share a version number.
 | Migration | From | To | Purpose |
 | --- | --- | --- | --- |
 | [`v0.9-to-v1.yaml`](v0.9-to-v1.yaml) | 0.9 | 1.0 | Adopts `harkers/workhub`'s `.workhub/workitems` compatibility protocol to contract v1 |
+| [`v1-to-v2.yaml`](v1-to-v2.yaml) | 1.0 | 2.0 | Adds the required `external_dependencies[]` as an empty list. v1 could not express an external dependency, so there is nothing to convert — one `set_default` step and nothing else |

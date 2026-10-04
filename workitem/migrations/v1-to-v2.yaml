@@ -1,0 +1,34 @@
+schema: workitem-migration
+from: "1.0"
+to: "2.0"
+id: 2026-10-04-adopt-external-dependencies
+description: >-
+  Contract v2 adds a required top-level external_dependencies[] so a WorkItem can
+  declare that it is blocked by work in another repository. v1 could not express
+  this at all: dependencies[].target was pattern-locked to a WorkItem id and the
+  loader rejected anything else.
+
+  The migration adds the key as an empty list on every record. That is the only
+  step, and it is deliberately the ONLY safe one: v1 records cannot carry external
+  dependencies, because v1 rejected them. So there is nothing to convert, infer or
+  guess. Any non-empty value invented here would be fabricating dependency data.
+
+  No field is dropped, renamed or retyped. dependencies[] is untouched, and so is
+  the dependencies[].target pattern.
+
+steps:
+  - id: add-external-dependencies
+    target: external_dependencies
+    transform: set_default
+    value: []
+    when_absent: true
+    note: >-
+      v1 records carry no external dependencies because v1 could not express one.
+      An empty list is therefore the complete, faithful representation of a v1
+      record under v2 -- not a placeholder, and not a value to be filled in later
+      by guessing at intent.
+
+# Records this migration has been applied to, for audit. Not consumed by the
+# migration engine. Populated at rollout, not before: naming a record here claims
+# work that has not happened.
+applied_to: []
