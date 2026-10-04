@@ -1,7 +1,7 @@
 schema: workitem-contract-version
 version: "1.0"
 
-current: v2.1
+current: v3
 
 # Contract versions are git tags in harkers/.github. Consumers pin a tag and
 # MUST NOT consume an unpinned moving ref. A version with released: null is
@@ -50,6 +50,29 @@ versions:
       docs/superpowers/specs/2026-10-04-external-dependency-resolution-design.md.
       Consumers migrating from 1.x need workitem/migrations/v1-to-v2.yaml: this is
       not a pin change, because external_dependencies is required.
+
+  - tag: workitem/v3
+    schema_version: "3.0"
+    released: "2026-10-04"
+    note: >-
+      Attested discharge for external dependencies, adopting harkers/workhub
+      Decision 0005 option (a). An external_dependencies[] entry discharges EITHER
+      by resolved_by (a WorkItem that must be DONE, machine-checked) OR by an
+      `attested` block (attributed, timestamped human confirmation) -- exclusively,
+      enforced with oneOf and additionalProperties false on both arms.
+
+      Why: v2.1 required discharge by a DONE WorkItem, so WI-20261003-0005 could
+      not finish without manufacturing three retrospective WorkItems for issues
+      13/14/15 that reached DONE before the ledger tracked them. That is the
+      failure Decision 0005 names when rejecting its option (b).
+
+      The weakening, stated: an attested edge cannot be verified by this contract.
+      The mitigation is attribution, not verifiability -- by and at are required, so
+      an unowned assertion is not expressible. PR_READY precedes DONE, so a
+      satisfied attestation carries a record through.
+
+      No v2-to-v3 migration: every v2 record uses resolved_by alone, which remains
+      valid under v3. v2.1 and v2 stay pinnable, superseded not withdrawn.
 
 # Version 0.9 is the pre-contract shape, not a released contract version. It is
 # recorded here because records exist in the wild that label themselves 1.0 while

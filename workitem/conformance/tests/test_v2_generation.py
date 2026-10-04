@@ -117,6 +117,11 @@ def test_the_v2_example_is_a_real_record_not_a_synthetic_stub() -> None:
     assert path.is_file(), f"missing v2 example: {path}"
     record = yaml.safe_load(path.read_text())
 
+    # The shared fixture tracks the current contract, so it is v3-shaped now. v2's
+    # claim is that v2 shipped with a real record, so roll the version back rather
+    # than keeping a second fixture that would drift. resolved_by alone is valid in
+    # both, which is why no v2-to-v3 migration is needed.
+    record["schema_version"] = "2.0"
     schema = json.loads((root / "workitem" / "v2.schema.json").read_text())
     jsonschema.validate(record, schema)
 
