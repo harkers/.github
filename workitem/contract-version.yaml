@@ -1,7 +1,7 @@
 schema: workitem-contract-version
 version: "1.0"
 
-current: v3
+current: v4
 
 # Contract versions are git tags in harkers/.github. Consumers pin a tag and
 # MUST NOT consume an unpinned moving ref. A version with released: null is
@@ -50,6 +50,35 @@ versions:
       docs/superpowers/specs/2026-10-04-external-dependency-resolution-design.md.
       Consumers migrating from 1.x need workitem/migrations/v1-to-v2.yaml: this is
       not a pin change, because external_dependencies is required.
+
+  - tag: workitem/v4
+    schema_version: "3.0"
+    released: "2026-10-04"
+    note: >-
+      Data release: no record field changes, so schema_version stays 3.0 and the
+      schema remains v3.schema.json. Carries two behavioural fixes.
+
+      (1) DONE requires the UNION of the record's `verification.required` and the
+      policy floor `review_policy.required_evidence[policy]` -- harkers/.github#31.
+      The rule previously read only the record's own list, so a record could opt out
+      of its own review policy by narrowing what it declared. `required: []` passed
+      vacuously, and so did `required: ["tests"]` with two FAILED reviews, because
+      `all()` had one element and it was true. REVIEWING already read the policy;
+      now both states read the same source. A record may still demand MORE than the
+      policy requires -- this is a floor, not a replacement.
+
+      (2) `REVIEWING -> READY`, guarded on `no_criterion_met` -- harkers/.github#40.
+      The ladder had no backward transition, so a record filed into the wrong state
+      could not be corrected: every exit from REVIEWING asserted something untrue
+      (FAILED claims work was attempted, CHANGES_REQUIRED claims a review happened).
+      The guard encodes the real invariant: you may return to READY only if you never
+      claimed anything was done.
+
+      Pin this tag, not workitem/v3. Records need no migration -- nothing about their
+      shape changed. Consumers MUST move contract-ref and gate-ref together: v4's
+      policy adds `required_before.DONE.policy_review_floor`, and a checker without
+      that rule treats an unknown rule key as a hard error, so workitem-gate/v6
+      would fail every DONE record against a v4 policy.
 
   - tag: workitem/v3
     schema_version: "3.0"

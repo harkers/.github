@@ -23,6 +23,12 @@ class WorkItemContext:
     verification: dict[str, str]
     has_completion_packet: bool
     past_specification: bool
+    # Whether any acceptance criterion on the record is already `met`. Read by the
+    # `no_criterion_met` edge condition. Deliberately has NO default: a defaulted
+    # field is silently False in any construction site that omits it, which would
+    # make the condition vacuously true while appearing to be enforced. Every
+    # caller must state the value.
+    any_criterion_met: bool
 
 
 @dataclass(frozen=True)
@@ -38,6 +44,7 @@ def default_context() -> WorkItemContext:
         verification={},
         has_completion_packet=False,
         past_specification=False,
+        any_criterion_met=False,
     )
 
 
@@ -63,6 +70,33 @@ class TransitionEngine:
                 self._conditional.append((frm, to, when))
             else:
                 self._declared.add((frm, to))
+
+    def _edge_condition_met(self, when: dict[str, Any], ctx: WorkItemContext) -> tuple[bool, str]:
+        """Evaluate one `when:` block on a transition edge.
+
+        Every key must be understood. An unrecognised key raises rather than being
+        ignored: a guard that silently does nothing is worse than no guard, because
+        the contract reads as though the edge is constrained.
+        """
+        for key, value in when.items():
+            if key == "delivery_mode":
+                allowed = value if isinstance(value, list) else [value]
+                if ctx.delivery_mode not in allowed:
+                    return False, f"condition delivery_mode={value} unmet"
+            elif key == "source_not_terminal":
+                continue
+            elif key == "no_criterion_met":
+                if value and ctx.any_criterion_met:
+                    return False, (
+                        "condition no_criterion_met unmet: an acceptance criterion "
+                        "is already met, so this record has claimed completed work"
+                    )
+            else:
+                raise ValueError(
+                    f"unknown transition condition {key!r}; a guard this checker "
+                    "cannot evaluate would be enforced by nothing"
+                )
+        return True, "every declared condition on this edge was met"
 
     def states(self) -> frozenset[str]:
         return frozenset(self._happy) | frozenset(self._exceptional)
@@ -132,14 +166,15 @@ class TransitionEngine:
 
         # Scan every conditional for this pair. A pair may be declared once per
         # mode, so first-match-wins would refuse whichever condition came second.
-        matched = False
+        reasons: list[str] = []
         for cfrm, cto, when in self._conditional:
             if cfrm == frm and cto == to:
-                matched = True
-                if when.get("delivery_mode") == ctx.delivery_mode:
-                    return Verdict(True, f"conditional edge for delivery.mode={ctx.delivery_mode}")
-        if matched:
-            return Verdict(False, "every declared condition on this edge was unmet")
+                ok, reason = self._edge_condition_met(when, ctx)
+                if ok:
+                    return Verdict(True, f"conditional edge: {reason}")
+                reasons.append(reason)
+        if reasons:
+            return Verdict(False, "; ".join(reasons))
 
         for target, when in self._wildcards:
             if target == to and when.get("source_not_terminal"):

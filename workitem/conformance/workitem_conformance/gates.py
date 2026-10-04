@@ -56,26 +56,61 @@ def _present(workitem: dict[str, Any], dotted: str) -> bool:
     return _read(workitem, dotted) not in (None, "", [], {})
 
 
+def _policy_floor(workitem: dict[str, Any], policy: dict[str, Any]) -> list[str] | None:
+    """The evidence the policy demands of this record's declared review policy.
+
+    Returns None when the record names a policy the contract does not define, which
+    is a defect in the record rather than an unmet floor.
+    """
+    spec = policy.get("review_policy") or {}
+    active = _read(workitem, spec.get("field", "verification.review_policy"))
+    return list((spec.get("required_evidence") or {}).get(active, ())) if active else None
+
+
+def _floor_unmet(workitem: dict[str, Any], status: str, policy: dict[str, Any]) -> bool | str:
+    floor = _policy_floor(workitem, policy)
+    if floor is None:
+        return "record names a review_policy the contract does not define"
+    missing = [
+        name
+        for name in floor
+        if (workitem.get("verification") or {}).get(name, {}).get("status") != status
+    ]
+    if not missing:
+        return True
+    # Name the evidence, not just the rule: "DONE requires policy_review_floor"
+    # tells an author nothing about what to do.
+    return (
+        f"review_policy={_read(workitem, 'verification.review_policy')} requires "
+        f"{sorted(missing)} to be {status!r} (policy floor, independent of what "
+        f"verification.required declares)"
+    )
+
+
 # Each entry interprets one rule key from policy.required_before. A new key in
 # the policy without an entry here is a hard error in check_before, not a
 # silently ignored rule.
-_RULES: dict[str, Callable[[dict[str, Any], Any], bool]] = {
-    "acceptance_criteria_min": lambda w, r: len(_criteria(w)) >= r,
-    "acceptance_criteria_must_be_measurable": lambda w, r: (
+#
+# A rule returns True, False, or a string explaining the failure. The string form
+# exists so a rule that knows *which* evidence is missing can say so.
+_RULES: dict[str, Callable[[dict[str, Any], Any, dict[str, Any]], bool | str]] = {
+    "acceptance_criteria_min": lambda w, r, p: len(_criteria(w)) >= r,
+    "acceptance_criteria_must_be_measurable": lambda w, r, p: (
         (not r)
         or all(
             bool(c.get("verification_method")) and bool(str(c.get("expected", "")).strip())
             for c in _criteria(w)
         )
     ),
-    "sizing_required": lambda w, r: (not r) or bool(w.get("sizing")),
-    "scope_required": lambda w, r: (not r) or _present(w, "scope"),
-    "privacy_required": lambda w, r: (not r) or _present(w, "privacy"),
-    "all_required_verification": lambda w, r: all(
+    "sizing_required": lambda w, r, p: (not r) or bool(w.get("sizing")),
+    "scope_required": lambda w, r, p: (not r) or _present(w, "scope"),
+    "privacy_required": lambda w, r, p: (not r) or _present(w, "privacy"),
+    "all_required_verification": lambda w, r, p: all(
         (w.get("verification", {}).get(name) or {}).get("status") == r
         for name in (w.get("verification") or {}).get("required", [])
     ),
-    "completion_packet_required": lambda w, r: (not r) or _present(w, "completion.packet"),
+    "policy_review_floor": _floor_unmet,
+    "completion_packet_required": lambda w, r, p: (not r) or _present(w, "completion.packet"),
 }
 
 
@@ -87,10 +122,13 @@ def check_before(workitem: dict[str, Any], policy: dict[str, Any], state: str) -
     unknown = sorted(set(rules) - set(_RULES))
     if unknown:
         return GateResult(False, (f"policy.required_before.{state} has unknown rules: {unknown}",))
-    failures = tuple(
-        f"{state} requires {key}" for key, rule in rules.items() if not _RULES[key](workitem, rule)
-    )
-    return GateResult(not failures, failures)
+    failures: list[str] = []
+    for key, rule in rules.items():
+        outcome = _RULES[key](workitem, rule, policy)
+        if outcome is True:
+            continue
+        failures.append(outcome if isinstance(outcome, str) else f"{state} requires {key}")
+    return GateResult(not failures, tuple(failures))
 
 
 def check_review_transition(workitem: dict[str, Any], policy: dict[str, Any]) -> GateResult:
