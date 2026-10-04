@@ -1,7 +1,7 @@
 schema: workitem-contract-version
 version: "1.0"
 
-current: v2
+current: v2.1
 
 # Contract versions are git tags in harkers/.github. Consumers pin a tag and
 # MUST NOT consume an unpinned moving ref. A version with released: null is
@@ -21,14 +21,28 @@ versions:
   - tag: workitem/v1.1
     schema_version: "1.0"
     released: "2026-10-03"
-    superseded_by: workitem/v2
+    superseded_by: workitem/v2.1
     note: >-
       Delivery-mode reachability fix. Adds no field; tightens the schema so a
       record cannot contradict its delivery.mode.
   - tag: workitem/v2
     schema_version: "2.0"
     released: "2026-10-04"
+    superseded_by: workitem/v2.1
     note: >-
+      SUPERSEDED IMMEDIATELY. migrations/v1-to-v2.yaml in this tag adds
+      external_dependencies but never rewrites schema_version, so a record migrated
+      with it still fails v2 validation. Use workitem/v2.1. The schema itself is
+      correct and unchanged; only the migration description was wrong. See #20.
+
+  - tag: workitem/v2.1
+    schema_version: "2.0"
+    released: "2026-10-04"
+    note: >-
+      Data release: no schema change, schema_version stays 2.0. Carries the corrected
+      migrations/v1-to-v2.yaml, which now sets schema_version via the new `set`
+      transform. Pin this tag, not workitem/v2. Consumers that already migrated with
+      v2 must add external_dependencies AND set schema_version to 2.0.
       External dependency resolution. Adds the required top-level
       external_dependencies[]; dependencies[] and its target pattern are unchanged.
       A dependency is satisfied only by DONE -- CANCELLED satisfies nothing but
