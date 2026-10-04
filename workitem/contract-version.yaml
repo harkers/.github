@@ -1,7 +1,7 @@
 schema: workitem-contract-version
 version: "1.0"
 
-current: v4
+current: v4.1
 
 # Contract versions are git tags in harkers/.github. Consumers pin a tag and
 # MUST NOT consume an unpinned moving ref. A version with released: null is
@@ -50,6 +50,30 @@ versions:
       docs/superpowers/specs/2026-10-04-external-dependency-resolution-design.md.
       Consumers migrating from 1.x need workitem/migrations/v1-to-v2.yaml: this is
       not a pin change, because external_dependencies is required.
+
+  - tag: workitem/v4.1
+    schema_version: "3.0"
+    released: "2026-10-04"
+    note: >-
+      Data release: no record field changes, so schema_version stays 3.0 and the
+      schema is still v3.schema.json.
+
+      Guards the two remaining backward edges into READY -- FAILED -> READY and
+      BLOCKED -> READY -- with the same `no_criterion_met` condition v4 applied to
+      REVIEWING -> READY. Cloud review of v4 found the invariant v4 claimed was false
+      as shipped: a REVIEWING record with a criterion met reached READY in two hops
+      through the public CLI, REVIEWING -> FAILED -> READY, each hop looking
+      reasonable alone. harkers/.github#42.
+
+      PLAN_READY -> READY is deliberately NOT guarded. It is the forward edge, and
+      guarding every edge into READY would break the ladder: a record that finished
+      planning with a criterion already met could never start. A test now asserts the
+      shape -- every edge into READY either arrives from earlier on the happy path or
+      declares the guard -- so a fourth backward edge fails rather than shipping
+      unguarded.
+
+      Pin this tag, not workitem/v4. Consumers MUST move contract-ref and gate-ref
+      together; see workitem/v4.
 
   - tag: workitem/v4
     schema_version: "3.0"
