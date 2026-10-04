@@ -251,4 +251,46 @@ def check_ledger(
             )
         )
 
+    # Satisfaction is a whole-ledger property: it depends on other records' current
+    # states, so it cannot live in gates.check_before, which sees one record.
+    #
+    # Only DONE satisfies a dependency. CANCELLED deliberately does not -- if it did,
+    # cancelling one WorkItem would silently release everything downstream, and
+    # WI-20261003-0001 requires 11 others, so a single cancellation would collapse the
+    # graph. Not reaching DONE is not a trap: CANCELLED stays reachable for every
+    # record unconditionally, so the invariant is that at least one terminal state is
+    # reachable, and DONE is reachable iff every dependency is DONE.
+    states = {
+        item.get("id"): item.get("state")
+        for _path, item in records
+        if isinstance(item.get("id"), str)
+    }
+
+    def unmet_targets(item: dict[str, Any]) -> list[str]:
+        internal = [
+            edge.get("target")
+            for edge in item.get("dependencies") or []
+            if isinstance(edge.get("target"), str)
+        ]
+        external = [
+            edge.get("resolved_by")
+            for edge in item.get("external_dependencies") or []
+            if isinstance(edge.get("resolved_by"), str)
+        ]
+        return [t for t in internal + external if states.get(t) != "DONE"]
+
+    for path, item in records:
+        if item.get("state") != "DONE":
+            continue
+        for target in unmet_targets(item):
+            problems.append(
+                InstanceProblem(
+                    str(path),
+                    "dependency-not-satisfied",
+                    f"state is DONE but {target!r} is "
+                    f"{states.get(target, 'absent from the ledger')!r}. "
+                    "Only DONE satisfies a dependency; CANCELLED does not.",
+                )
+            )
+
     return problems
