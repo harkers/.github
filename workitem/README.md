@@ -135,6 +135,32 @@ Consumers pin a ref; they never consume an unpinned `main`. Cached contracts
 retain provenance — repo, requested ref, resolved sha, checksum, fetch time.
 See `contract-version.yaml` and `provenance.schema.json`.
 
+The checker is pinned separately from the contract data, because the two move at
+different rates: `contract-ref` selects the contract, `gate-ref` selects the
+conformance checker that validates against it.
+
+### Rollback
+
+| Contract | Gate | Notes |
+|---|---|---|
+| `workitem/v2` | `workitem-gate/v5` | current |
+| `workitem/v1.1` | `workitem-gate/v4` | previous |
+| `workitem/v1` | `workitem-gate/v2` | first stable contract |
+| — | `workitem-gate/v1` | **broken**: quoted `"true"` under a `boolean` workflow input |
+
+Rolling back within the v1 line is a pin change. Rolling back **from v2** is not:
+`external_dependencies` is a required field, so v1-shaped records do not validate
+against v2 and a v2-shaped record does not validate against v1. Use
+`migrations/v1-to-v2.yaml` — its single step adds `external_dependencies: []`,
+which is faithful rather than a placeholder, because v1 could not express an
+external dependency at all.
+
+Rolling back the checker alone (`gate-ref`) is safe at any time: the checker
+validates records, it does not change their shape. Keep the caller job name
+constant when re-pinning. It is half of the required status-check context, so a
+name that interpolates a ref silently re-blocks a consumer's `main` on a green run
+(`harkers/.github`#14).
+
 ## Conformance
 
 ```bash

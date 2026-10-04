@@ -1,7 +1,7 @@
 schema: workitem-contract-version
 version: "1.0"
 
-current: v1.1
+current: v2
 
 # Contract versions are git tags in harkers/.github. Consumers pin a tag and
 # MUST NOT consume an unpinned moving ref. A version with released: null is
@@ -21,12 +21,21 @@ versions:
   - tag: workitem/v1.1
     schema_version: "1.0"
     released: "2026-10-03"
+    superseded_by: workitem/v2
     note: >-
       Delivery-mode reachability fix. Adds no field; tightens the schema so a
       record cannot contradict its delivery.mode.
   - tag: workitem/v2
     schema_version: "2.0"
-    released: null
+    released: "2026-10-04"
+    note: >-
+      External dependency resolution. Adds the required top-level
+      external_dependencies[]; dependencies[] and its target pattern are unchanged.
+      A dependency is satisfied only by DONE -- CANCELLED satisfies nothing but
+      stays reachable, so no record is ever trapped. See
+      docs/superpowers/specs/2026-10-04-external-dependency-resolution-design.md.
+      Consumers migrating from 1.x need workitem/migrations/v1-to-v2.yaml: this is
+      not a pin change, because external_dependencies is required.
 
 # Version 0.9 is the pre-contract shape, not a released contract version. It is
 # recorded here because records exist in the wild that label themselves 1.0 while
