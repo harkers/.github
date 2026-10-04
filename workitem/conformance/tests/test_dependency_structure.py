@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from workitem_conformance.instances import check_ledger, find_cycles
 
 
@@ -116,3 +118,64 @@ def test_a_dangling_internal_target_is_still_reported():
     codes = codes_for([a])
     assert "unresolved-dependency" in codes
     assert "dependency-cycle" not in codes
+
+
+# --- malformed entries must not crash the gate -------------------------------
+#
+# A malformed edge is already a schema violation, and cli.validate collects schema
+# errors *and* runs these ledger checks. Before _edges(), edge.get(...) raised
+# AttributeError on a non-mapping entry, so the gate crashed instead of reporting
+# the violation it had already recorded: a consumer could not see their own typo,
+# and one character was enough to take the gate down. The dependencies[] half of
+# this was pre-existing, not introduced with external_dependencies.
+
+MALFORMED = [None, "bad", 42, ["x"], 3.5, True]
+
+
+@pytest.mark.parametrize("bad", MALFORMED)
+@pytest.mark.parametrize("field", ["dependencies", "external_dependencies"])
+def test_a_malformed_edge_does_not_crash_the_ledger_check(bad, field):
+    record = {
+        "id": "WI-20261004-0001",
+        "state": "DONE",
+        "dependencies": [],
+        "external_dependencies": [],
+    }
+    record[field] = [bad]
+    # Must return problems, not raise.
+    codes_for([record])
+
+
+@pytest.mark.parametrize("bad", MALFORMED)
+def test_a_malformed_edge_alongside_a_good_one_is_ignored_not_fatal(bad):
+    record = {
+        "id": "WI-20261004-0001",
+        "state": "DONE",
+        "dependencies": [{"target": "WI-20261004-0002", "type": "REQUIRES"}, bad],
+        "external_dependencies": [bad],
+    }
+    other = {"id": "WI-20261004-0002", "state": "DONE", "dependencies": [], "external_dependencies": []}
+    codes = codes_for([record, other])
+    assert "dependency-not-satisfied" not in codes, "the good edge resolved; the bad one is the schema's problem"
+
+
+def test_a_non_list_dependency_field_does_not_crash():
+    for value in ({"target": "WI-20261004-0002"}, "WI-20261004-0002", 7):
+        record = {
+            "id": "WI-20261004-0001",
+            "state": "DRAFT",
+            "dependencies": value,
+            "external_dependencies": value,
+        }
+        codes_for([record])
+
+
+def test_edges_helper_keeps_only_mappings():
+    from workitem_conformance.instances import _edges
+
+    good = {"target": "WI-20261004-0002", "type": "REQUIRES"}
+    assert _edges({"dependencies": [good, None, "x", 7]}, "dependencies") == [good]
+    assert _edges({"dependencies": None}, "dependencies") == []
+    assert _edges({}, "dependencies") == []
+    assert _edges({"dependencies": "not-a-list"}, "dependencies") == []
+    assert _edges({"dependencies": {"target": "x"}}, "dependencies") == []

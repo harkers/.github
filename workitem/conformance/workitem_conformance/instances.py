@@ -91,6 +91,25 @@ def find_cycles(dep_map: dict[str, list[str]]) -> list[list[str]]:
     return cycles
 
 
+def _edges(item: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    """Return the mapping entries of item[key], skipping anything that is not one.
+
+    A malformed entry -- `[null]`, `['bad']`, `[42]` -- is already a schema
+    violation, and cli.validate collects schema errors *and* runs these ledger
+    checks. Without this guard, `edge.get(...)` raised AttributeError and the gate
+    crashed instead of reporting the violation it had just recorded. A consumer
+    could not see their own typo, and one character was enough to take the gate
+    down.
+
+    Skipping is correct rather than lenient: the schema error is the finding, and
+    the ledger rules below cannot interpret an entry that has no fields.
+    """
+    raw = item.get(key) or []
+    if not isinstance(raw, list):
+        return []
+    return [edge for edge in raw if isinstance(edge, dict)]
+
+
 def build_dep_map(records: list[tuple[Path, dict[str, Any]]]) -> dict[str, list[str]]:
     """Map each record id to everything it waits on.
 
@@ -103,14 +122,14 @@ def build_dep_map(records: list[tuple[Path, dict[str, Any]]]) -> dict[str, list[
         wid = item.get("id")
         if not isinstance(wid, str):
             continue
-        targets = [
-            edge.get("target")
-            for edge in item.get("dependencies") or []
+        targets: list[str] = [
+            edge["target"]
+            for edge in _edges(item, "dependencies")
             if isinstance(edge.get("target"), str)
         ]
         targets += [
-            edge.get("resolved_by")
-            for edge in item.get("external_dependencies") or []
+            edge["resolved_by"]
+            for edge in _edges(item, "external_dependencies")
             if isinstance(edge.get("resolved_by"), str)
         ]
         dep_map[wid] = targets
@@ -186,7 +205,7 @@ def check_instance(
             )
         )
 
-    for edge in item.get("dependencies") or []:
+    for edge in _edges(item, "dependencies"):
         target = str(edge.get("target", ""))
         if EXTERNAL_REF.match(target):
             problems.append(
@@ -233,7 +252,7 @@ def check_ledger(
                     rel, "unresolved-parent", f"hierarchy.parent {parent!r} has no record"
                 )
             )
-        for edge in item.get("dependencies") or []:
+        for edge in _edges(item, "dependencies"):
             target = str(edge.get("target", ""))
             if ID_PATTERN.match(target) and target not in known:
                 problems.append(
@@ -241,7 +260,7 @@ def check_ledger(
                         rel, "unresolved-dependency", f"dependency {target!r} has no record"
                     )
                 )
-        for edge in item.get("external_dependencies") or []:
+        for edge in _edges(item, "external_dependencies"):
             discharge = str(edge.get("resolved_by", ""))
             if ID_PATTERN.match(discharge) and discharge not in known:
                 problems.append(
@@ -284,13 +303,13 @@ def check_ledger(
         # cannot be DONE while waiting on something that does not exist. The cycle
         # check does not do this, because a dangling edge is only ever one defect.
         internal = [
-            edge.get("target")
-            for edge in item.get("dependencies") or []
+            edge["target"]
+            for edge in _edges(item, "dependencies")
             if isinstance(edge.get("target"), str)
         ]
         external = [
-            edge.get("resolved_by")
-            for edge in item.get("external_dependencies") or []
+            edge["resolved_by"]
+            for edge in _edges(item, "external_dependencies")
             if isinstance(edge.get("resolved_by"), str)
         ]
         return [t for t in internal + external if states.get(t) != "DONE"]
