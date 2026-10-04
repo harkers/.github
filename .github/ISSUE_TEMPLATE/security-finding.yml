@@ -28,12 +28,25 @@ body:
     id: severity
     attributes:
       label: Severity
+      description: Security impact of the finding. Severity is separate from remediation priority.
       options:
         - Critical
         - High
         - Medium
         - Low
         - Informational
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: Remediation order from impact and risk, not fix effort. Apply the matching priority:P0–priority:P3 GitHub label where available.
+      options:
+        - P0 — Critical / immediate remediation / blocks delivery
+        - P1 — High / fix before PR_READY unless explicitly authorised waiver
+        - P2 — Medium / tracked; normally before unrelated discretionary work
+        - P3 — Low / backlog / non-blocking by default
     validations:
       required: true
   - type: dropdown
