@@ -91,6 +91,24 @@ def find_cycles(dep_map: dict[str, list[str]]) -> list[list[str]]:
     return cycles
 
 
+def _is_attested(edge: dict[str, Any]) -> bool:
+    """True when an external_dependencies entry is discharged by human attestation.
+
+    v3 lets an entry discharge EITHER by resolved_by (a WorkItem that must be DONE)
+    OR by an `attested` block, exclusively. An attested edge cannot be verified
+    against the ledger -- that is the accepted weakening, and `by`/`at` being
+    required is what stops an unowned assertion.
+
+    An attested edge contributes no node to the dependency graph and no unmet
+    target: there is no WorkItem to resolve. Both fall out of `resolved_by` being
+    absent, and both are expressed below by the isinstance filter rather than by
+    this predicate -- deliberately, because the isinstance filter also does the
+    right thing for a malformed edge carrying both keys, where checking
+    resolved_by is more useful than skipping it.
+    """
+    return "attested" in edge
+
+
 def _edges(item: dict[str, Any], key: str) -> list[dict[str, Any]]:
     """Return the mapping entries of item[key], skipping anything that is not one.
 
@@ -261,6 +279,8 @@ def check_ledger(
                     )
                 )
         for edge in _edges(item, "external_dependencies"):
+            if _is_attested(edge):
+                continue  # discharged by attestation; there is no id to resolve
             discharge = str(edge.get("resolved_by", ""))
             if ID_PATTERN.match(discharge) and discharge not in known:
                 problems.append(

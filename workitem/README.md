@@ -143,7 +143,8 @@ conformance checker that validates against it.
 
 | Contract | Gate | Notes |
 |---|---|---|
-| `workitem/v2.1` | `workitem-gate/v5` | **current** — pin this |
+| `workitem/v3` | `workitem-gate/v6` | **current** — pin this |
+| `workitem/v2.1` | `workitem-gate/v5` | attested discharge unavailable |
 | `workitem/v2` | `workitem-gate/v5` | superseded immediately; its `v1-to-v2.yaml` never set `schema_version`, so a record migrated with it still fails v2 |
 | `workitem/v1.1` | `workitem-gate/v4` | previous |
 | `workitem/v1` | `workitem-gate/v2` | first stable contract |
