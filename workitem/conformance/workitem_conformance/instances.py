@@ -28,6 +28,84 @@ ID_PATTERN = re.compile(r"^WI-\d{8}-\d{4}$")
 EXTERNAL_REF = re.compile(r"^(?!\d)(?!WI-).+")
 
 
+def find_cycles(dep_map: dict[str, list[str]]) -> list[list[str]]:
+    """Return every cycle in the dependency graph, each as a node list.
+
+    Iterative rather than recursive: a 5000-deep chain is realistic once a ledger
+    grows, and recursion would exhaust the stack on a graph that is merely deep.
+
+    Edges to nodes outside dep_map are ignored here. A dangling target is a
+    separate problem code (unresolved-dependency), and treating it as a cycle
+    would report one defect twice under two codes.
+    """
+    UNVISITED, ON_PATH, DONE = 0, 1, 2
+    marks: dict[str, int] = dict.fromkeys(dep_map, UNVISITED)
+    cycles: list[list[str]] = []
+    seen_signatures: set[frozenset[str]] = set()
+
+    for root in dep_map:
+        if marks[root] != UNVISITED:
+            continue
+        marks[root] = ON_PATH
+        path: list[str] = [root]
+        on_path_index: dict[str, int] = {root: 0}
+        stack: list[tuple[str, Any]] = [(root, iter(dep_map[root]))]
+
+        while stack:
+            node, children = stack[-1]
+            advanced = False
+            for child in children:
+                if child not in dep_map:
+                    continue
+                if marks[child] == ON_PATH:
+                    cycle = path[on_path_index[child] :] + [child]
+                    # The same cycle is reachable from each of its nodes; report it once.
+                    signature = frozenset(cycle)
+                    if signature not in seen_signatures:
+                        seen_signatures.add(signature)
+                        cycles.append(cycle)
+                    continue
+                if marks[child] == UNVISITED:
+                    marks[child] = ON_PATH
+                    on_path_index[child] = len(path)
+                    path.append(child)
+                    stack.append((child, iter(dep_map[child])))
+                    advanced = True
+                    break
+            if not advanced:
+                marks[node] = DONE
+                on_path_index.pop(node, None)
+                path.pop()
+                stack.pop()
+    return cycles
+
+
+def build_dep_map(records: list[tuple[Path, dict[str, Any]]]) -> dict[str, list[str]]:
+    """Map each record id to everything it waits on.
+
+    Spans both dependency kinds. A cycle can pass through an external edge's
+    discharge -- A waits on external B, and B's discharge is A -- so a map built
+    from dependencies[] alone would miss it.
+    """
+    dep_map: dict[str, list[str]] = {}
+    for _path, item in records:
+        wid = item.get("id")
+        if not isinstance(wid, str):
+            continue
+        targets = [
+            edge.get("target")
+            for edge in item.get("dependencies") or []
+            if isinstance(edge.get("target"), str)
+        ]
+        targets += [
+            edge.get("resolved_by")
+            for edge in item.get("external_dependencies") or []
+            if isinstance(edge.get("resolved_by"), str)
+        ]
+        dep_map[wid] = targets
+    return dep_map
+
+
 @dataclass(frozen=True)
 class InstanceProblem:
     path: str
@@ -152,5 +230,25 @@ def check_ledger(
                         rel, "unresolved-dependency", f"dependency {target!r} has no record"
                     )
                 )
+        for edge in item.get("external_dependencies") or []:
+            discharge = str(edge.get("resolved_by", ""))
+            if ID_PATTERN.match(discharge) and discharge not in known:
+                problems.append(
+                    InstanceProblem(
+                        rel,
+                        "unresolved-external-discharge",
+                        f"resolved_by {discharge!r} is not a WorkItem id in this "
+                        "ledger. Discharge must name real completed work here.",
+                    )
+                )
+
+    for cycle in find_cycles(build_dep_map(records)):
+        problems.append(
+            InstanceProblem(
+                str(Path("<ledger>")),
+                "dependency-cycle",
+                f"dependency cycle: {' -> '.join(cycle)}",
+            )
+        )
 
     return problems
