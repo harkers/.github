@@ -17,6 +17,18 @@ description: >-
   the dependencies[].target pattern.
 
 steps:
+  # The 0.9 -> v1 migration has no equivalent step because 0.9 records already
+  # labelled themselves 1.0 -- only their shape was wrong. That is not true here:
+  # a v1 record says 1.0 and v2 constrains records to 2.0, so the version stamp
+  # must be rewritten or the migrated record still fails validation.
+  - id: set-schema-version
+    target: schema_version
+    transform: set
+    value: "2.0"
+    note: >-
+      The one value this migration is entitled to decide. It is the migration's own
+      destination version, not record content.
+
   - id: add-external-dependencies
     target: external_dependencies
     transform: set_default

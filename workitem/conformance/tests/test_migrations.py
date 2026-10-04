@@ -20,6 +20,7 @@ MIGRATIONS = "workitem/migrations"
 BOUNDARY_FIELDS = {"scope", "privacy"}
 
 DOCUMENTED_TRANSFORMS = {
+    "set",
     "set_default",
     "derive",
     "rename",
@@ -195,23 +196,95 @@ def test_v1_to_v2_declares_the_versions_it_migrates() -> None:
     assert migration["to"] == "2.0"
 
 
-def test_v1_to_v2_has_exactly_one_step_and_it_defaults_to_empty() -> None:
-    steps = _v1_to_v2()["steps"]
-    assert len(steps) == 1, f"expected one step, got {[s['id'] for s in steps]}"
-    step = steps[0]
-    assert step["target"] == "external_dependencies"
-    assert step["transform"] == "set_default"
-    assert step["value"] == []
-    assert step["when_absent"] is True
+def test_v1_to_v2_steps_the_version_stamp_and_the_new_field() -> None:
+    """Two steps, and both are needed.
+
+    The version stamp was missing from the first release of this migration, which
+    made every migrated record fail v2 validation on schema_version even though the
+    record carried the new field. The 0.9 -> v1 migration needs no equivalent step
+    because 0.9 records already labelled themselves 1.0.
+    """
+    steps = {s["id"]: s for s in _v1_to_v2()["steps"]}
+    assert set(steps) == {"set-schema-version", "add-external-dependencies"}, sorted(steps)
+
+    version = steps["set-schema-version"]
+    assert version["target"] == "schema_version"
+    assert version["transform"] == "set"
+    assert version["value"] == "2.0"
+
+    field = steps["add-external-dependencies"]
+    assert field["target"] == "external_dependencies"
+    assert field["transform"] == "set_default"
+    assert field["value"] == []
+    assert field["when_absent"] is True
 
 
-def test_v1_to_v2_invents_nothing() -> None:
-    """Every step must be an empty default. A non-empty value here would fabricate
-    dependency data that the v1 record never carried."""
+def test_v1_to_v2_invents_no_record_content() -> None:
+    """No step may fabricate record content.
+
+    The version stamp is the one exception and is checked separately: a migration
+    is entitled to decide its own destination version, and to nothing else. An
+    earlier version of this test banned *every* non-empty value, which forbade the
+    schema_version step the migration actually needs -- so the incompleteness was
+    enforced as correct.
+    """
     for step in _v1_to_v2()["steps"]:
+        if step["target"] == "schema_version":
+            assert step["transform"] == "set", step["id"]
+            assert step["value"] == _v1_to_v2()["to"], step["id"]
+            continue
         assert step["transform"] == "set_default", step["id"]
         assert step["value"] == [], step["id"]
         assert step.get("when_absent") is True, step["id"]
+
+
+def _apply(migration: dict, record: dict) -> dict:
+    """Apply the declarative steps this migration uses, and no others.
+
+    Deliberately tiny: `set` and `set_default` are the only transforms v1->v2 uses.
+    A step using any other transform raises, so this test cannot silently pass by
+    skipping work it does not understand.
+    """
+    out = dict(record)
+    for step in migration["steps"]:
+        transform = step["transform"]
+        if transform == "set":
+            out[step["target"]] = step["value"]
+        elif transform == "set_default":
+            if step.get("when_absent") and step["target"] not in out:
+                out[step["target"]] = step["value"]
+        else:
+            raise AssertionError(f"unhandled transform {transform!r} in {step['id']}")
+    return out
+
+
+def test_applying_the_migration_to_a_v1_record_yields_a_valid_v2_record() -> None:
+    """The end-to-end check the migration was missing.
+
+    Building the expected record by hand proved nothing: the hand-built record had
+    external_dependencies, so the test passed while the *migration* never set it.
+    Driving the migration's own steps and validating the output is what actually
+    establishes that the migration is complete -- and it catches a step the
+    migration forgets, which is how v2 shipped with no schema_version step and every
+    migrated record still failed.
+    """
+    root = load_contract().root
+    v2 = json.loads((root / "workitem" / "v2.schema.json").read_text())
+    migration = _v1_to_v2()
+
+    v1_record = load_example(root, "task")
+    v1_record["schema_version"] = "1.0"
+    v1_record.pop("external_dependencies", None)
+    jsonschema.validate(v1_record, json.loads((root / "workitem" / "v1.schema.json").read_text()))
+
+    migrated = _apply(migration, v1_record)
+    jsonschema.validate(migrated, v2)  # raises with the exact unaddressed field
+
+
+def test_the_migration_targets_the_version_v2_expects() -> None:
+    root = load_contract().root
+    v2 = json.loads((root / "workitem" / "v2.schema.json").read_text())
+    assert _v1_to_v2()["to"] == v2["properties"]["schema_version"]["const"]
 
 
 def test_v1_to_v2_does_not_touch_dependencies_or_a_boundary_field() -> None:
@@ -236,8 +309,10 @@ def test_v2_requires_exactly_the_field_the_migration_adds() -> None:
     added_properties = set(v2["properties"]) - set(v1["properties"])
     assert added_required == added_properties == {"external_dependencies"}
 
+    # The migration must address every field v2 newly requires, plus the version
+    # stamp -- which is not a new field but does have to be rewritten.
     targets = {s["target"] for s in _v1_to_v2()["steps"]}
-    assert targets == added_required
+    assert targets == added_required | {"schema_version"}
 
 
 def test_a_v1_shaped_record_fails_v2_and_passes_v1() -> None:

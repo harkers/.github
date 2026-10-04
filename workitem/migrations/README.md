@@ -43,6 +43,7 @@ steps:
 | `transform` | Behaviour |
 | --- | --- |
 | `set_default` | Set `value` when the field is absent (`when_absent: true`) |
+| `set` | Set `value` unconditionally, overwriting what is there. For values the migration itself decides — a version stamp, never record content |
 | `derive` | Compute `target` from other fields via a named `rule` |
 | `rename` | Move a field's value to a new `target`, optionally `coerce`d |
 | `coerce` | Change a value's type without changing its meaning (`url_to_number`) |
