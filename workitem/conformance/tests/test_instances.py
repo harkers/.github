@@ -137,10 +137,30 @@ def test_a_resolvable_dependency_is_accepted(tmp_path, contract):
     first = load_example(contract.root, "task")
     first["dependencies"] = [{"target": "WI-20261003-0002", "type": "REQUIRES"}]
     write_record(root, "WI-20261003-0001", first)
-    write_record(root, "WI-20261003-0002", load_example(contract.root, "bug"))
+
+    # examples/bug.yaml (WI-20261003-0002) declares its own dependency on
+    # WI-20261003-0001. Combined with the edge above that closes a cycle, so this
+    # fixture was asserting a clean ledger while building an invalid one. The test
+    # is about target resolution, not about the bug example's edges, so those are
+    # cleared rather than the assertion relaxed.
+    second = load_example(contract.root, "bug")
+    second["dependencies"] = []
+    write_record(root, "WI-20261003-0002", second)
 
     problems = validate(contract.root, root, LEDGER_PATTERN)
     assert problems == [], [str(p) for p in problems]
+
+
+def test_the_canonical_examples_do_not_form_a_cycle(contract):
+    """The four shipped examples are copied into ledgers by other tests. Together
+    they must stay acyclic, or every one of those ledgers inherits a cycle."""
+    from workitem_conformance.instances import build_dep_map, find_cycles
+
+    records = [
+        (Path(f"{name}/workitem.yaml"), load_example(contract.root, name))
+        for name in ("task", "bug", "feature", "investigation")
+    ]
+    assert find_cycles(build_dep_map(records)) == []
 
 
 def test_an_external_dependency_target_is_reported_as_unsupported(ledger, contract):

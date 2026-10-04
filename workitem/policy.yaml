@@ -77,7 +77,13 @@ gates:
   - state: DONE
     predicate: check_before
     enforced: true
-    note: "see required_before.DONE"
+    note: >-
+      see required_before.DONE. Dependency satisfaction is deliberately NOT a
+      required_before rule: check_before receives a single record and cannot see the
+      ledger, while satisfaction depends on other records' current states. A
+      dependency is satisfied only by DONE -- CANCELLED satisfies nothing but stays
+      reachable, so no record is ever trapped. Enforced by the whole-ledger check in
+      the conformance checker, problem code dependency-not-satisfied.
 
 # Happy-path states with no entry gate of their own. DRAFT is where a WorkItem
 # starts; IN_PROGRESS inherits READY's preconditions, which is what "dependencies

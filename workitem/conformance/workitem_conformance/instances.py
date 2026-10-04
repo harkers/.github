@@ -28,6 +28,114 @@ ID_PATTERN = re.compile(r"^WI-\d{8}-\d{4}$")
 EXTERNAL_REF = re.compile(r"^(?!\d)(?!WI-).+")
 
 
+def find_cycles(dep_map: dict[str, list[str]]) -> list[list[str]]:
+    """Return one representative cycle per DFS back edge, each as a node list.
+
+    This is *not* an exhaustive enumeration. A graph can hold more cycles than this
+    returns: in {a: [b, c], b: [c], c: [a]} both a->b->c->a and a->c->a are cycles,
+    and only the first is reported, because the a->c->a closing edge is examined
+    after c has already been marked done.
+
+    Exhaustive enumeration is unnecessary here. An acyclic graph has no back edge,
+    so `find_cycles(...) == []` is a sound acyclicity verdict in both directions --
+    which is the only question the ledger check asks. The per-cycle count should
+    not be read as a count of cycles.
+
+    Iterative rather than recursive: a 5000-deep chain is realistic once a ledger
+    grows, and recursion would exhaust the stack on a graph that is merely deep.
+
+    Edges to nodes outside dep_map are ignored here. A dangling target is a
+    separate problem code (unresolved-dependency), and treating it as a cycle
+    would report one defect twice under two codes.
+    """
+    UNVISITED, ON_PATH, DONE = 0, 1, 2
+    marks: dict[str, int] = dict.fromkeys(dep_map, UNVISITED)
+    cycles: list[list[str]] = []
+    seen_signatures: set[frozenset[str]] = set()
+
+    for root in dep_map:
+        if marks[root] != UNVISITED:
+            continue
+        marks[root] = ON_PATH
+        path: list[str] = [root]
+        on_path_index: dict[str, int] = {root: 0}
+        stack: list[tuple[str, Any]] = [(root, iter(dep_map[root]))]
+
+        while stack:
+            node, children = stack[-1]
+            advanced = False
+            for child in children:
+                if child not in dep_map:
+                    continue
+                if marks[child] == ON_PATH:
+                    cycle = path[on_path_index[child] :] + [child]
+                    # A duplicate edge can close the same cycle twice within one
+                    # tree; collapse on the node set rather than record it twice.
+                    signature = frozenset(cycle)
+                    if signature not in seen_signatures:
+                        seen_signatures.add(signature)
+                        cycles.append(cycle)
+                    continue
+                if marks[child] == UNVISITED:
+                    marks[child] = ON_PATH
+                    on_path_index[child] = len(path)
+                    path.append(child)
+                    stack.append((child, iter(dep_map[child])))
+                    advanced = True
+                    break
+            if not advanced:
+                marks[node] = DONE
+                on_path_index.pop(node, None)
+                path.pop()
+                stack.pop()
+    return cycles
+
+
+def _edges(item: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    """Return the mapping entries of item[key], skipping anything that is not one.
+
+    A malformed entry -- `[null]`, `['bad']`, `[42]` -- is already a schema
+    violation, and cli.validate collects schema errors *and* runs these ledger
+    checks. Without this guard, `edge.get(...)` raised AttributeError and the gate
+    crashed instead of reporting the violation it had just recorded. A consumer
+    could not see their own typo, and one character was enough to take the gate
+    down.
+
+    Skipping is correct rather than lenient: the schema error is the finding, and
+    the ledger rules below cannot interpret an entry that has no fields.
+    """
+    raw = item.get(key) or []
+    if not isinstance(raw, list):
+        return []
+    return [edge for edge in raw if isinstance(edge, dict)]
+
+
+def build_dep_map(records: list[tuple[Path, dict[str, Any]]]) -> dict[str, list[str]]:
+    """Map each record id to everything it waits on.
+
+    Spans both dependency kinds. A cycle can pass through an external edge's
+    discharge -- A waits on external B, and B's discharge is A -- so a map built
+    from dependencies[] alone would miss it.
+    """
+    dep_map: dict[str, list[str]] = {}
+    for _path, item in records:
+        wid = item.get("id")
+        if not isinstance(wid, str):
+            continue
+        targets: list[str] = [
+            edge["target"]
+            for edge in _edges(item, "dependencies")
+            if isinstance(edge.get("target"), str)
+        ]
+        targets += [
+            edge["resolved_by"]
+            for edge in _edges(item, "external_dependencies")
+            if isinstance(edge.get("resolved_by"), str)
+        ]
+        dep_map[wid] = targets
+    return dep_map
+
+
 @dataclass(frozen=True)
 class InstanceProblem:
     path: str
@@ -97,7 +205,7 @@ def check_instance(
             )
         )
 
-    for edge in item.get("dependencies") or []:
+    for edge in _edges(item, "dependencies"):
         target = str(edge.get("target", ""))
         if EXTERNAL_REF.match(target):
             problems.append(
@@ -144,7 +252,7 @@ def check_ledger(
                     rel, "unresolved-parent", f"hierarchy.parent {parent!r} has no record"
                 )
             )
-        for edge in item.get("dependencies") or []:
+        for edge in _edges(item, "dependencies"):
             target = str(edge.get("target", ""))
             if ID_PATTERN.match(target) and target not in known:
                 problems.append(
@@ -152,5 +260,72 @@ def check_ledger(
                         rel, "unresolved-dependency", f"dependency {target!r} has no record"
                     )
                 )
+        for edge in _edges(item, "external_dependencies"):
+            discharge = str(edge.get("resolved_by", ""))
+            if ID_PATTERN.match(discharge) and discharge not in known:
+                problems.append(
+                    InstanceProblem(
+                        rel,
+                        "unresolved-external-discharge",
+                        f"resolved_by {discharge!r} is not a WorkItem id in this "
+                        "ledger. Discharge must name real completed work here.",
+                    )
+                )
+
+    for cycle in find_cycles(build_dep_map(records)):
+        problems.append(
+            InstanceProblem(
+                str(Path("<ledger>")),
+                "dependency-cycle",
+                f"dependency cycle: {' -> '.join(cycle)}",
+            )
+        )
+
+    # Satisfaction is a whole-ledger property: it depends on other records' current
+    # states, so it cannot live in gates.check_before, which sees one record.
+    #
+    # Only DONE satisfies a dependency. CANCELLED deliberately does not -- if it did,
+    # cancelling one WorkItem would silently release everything downstream, and
+    # WI-20261003-0001 requires 11 others, so a single cancellation would collapse the
+    # graph. Not reaching DONE is not a trap: CANCELLED stays reachable for every
+    # record unconditionally, so the invariant is that at least one terminal state is
+    # reachable, and DONE is reachable iff every dependency is DONE.
+    states = {
+        item.get("id"): item.get("state")
+        for _path, item in records
+        if isinstance(item.get("id"), str)
+    }
+
+    def unmet_targets(item: dict[str, Any]) -> list[str]:
+        # A target absent from the ledger is reported here as unmet as well as by
+        # unresolved-dependency above. That double report is deliberate: such a
+        # record genuinely violates two rules -- its edge does not resolve, and it
+        # cannot be DONE while waiting on something that does not exist. The cycle
+        # check does not do this, because a dangling edge is only ever one defect.
+        internal = [
+            edge["target"]
+            for edge in _edges(item, "dependencies")
+            if isinstance(edge.get("target"), str)
+        ]
+        external = [
+            edge["resolved_by"]
+            for edge in _edges(item, "external_dependencies")
+            if isinstance(edge.get("resolved_by"), str)
+        ]
+        return [t for t in internal + external if states.get(t) != "DONE"]
+
+    for path, item in records:
+        if item.get("state") != "DONE":
+            continue
+        for target in unmet_targets(item):
+            problems.append(
+                InstanceProblem(
+                    str(path),
+                    "dependency-not-satisfied",
+                    f"state is DONE but {target!r} is "
+                    f"{states.get(target, 'absent from the ledger')!r}. "
+                    "Only DONE satisfies a dependency; CANCELLED does not.",
+                )
+            )
 
     return problems

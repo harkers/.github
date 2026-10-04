@@ -7,12 +7,14 @@ mechanical form of that promise.
 
 from __future__ import annotations
 
+import json
 import re
 
+import jsonschema
 import pytest
 import yaml
 
-from workitem_conformance.contract import load_contract
+from workitem_conformance.contract import load_contract, load_example
 
 MIGRATIONS = "workitem/migrations"
 BOUNDARY_FIELDS = {"scope", "privacy"}
@@ -157,3 +159,86 @@ def test_the_adoption_migration_documents_which_records_it_applies_to() -> None:
     assert applied, "an adoption migration must record the records it was applied to"
     for entry in applied:
         assert re.fullmatch(r"WI-\d{8}-\d{4}", entry["id"]), entry
+
+
+# --- v1 -> v2: external_dependencies -------------------------------------------
+
+
+def _v1_to_v2() -> dict:
+    root = load_contract().root
+    return _load(root / MIGRATIONS / "v1-to-v2.yaml")
+
+
+def test_v1_to_v2_exists() -> None:
+    """v2 makes external_dependencies required, so a migration must exist. Without
+    one, every v1-shaped record silently fails v2 validation."""
+    root = load_contract().root
+    assert (root / MIGRATIONS / "v1-to-v2.yaml").is_file()
+
+
+def test_v1_to_v2_declares_the_versions_it_migrates() -> None:
+    migration = _v1_to_v2()
+    assert migration["schema"] == "workitem-migration"
+    assert migration["from"] == "1.0"
+    assert migration["to"] == "2.0"
+
+
+def test_v1_to_v2_has_exactly_one_step_and_it_defaults_to_empty() -> None:
+    steps = _v1_to_v2()["steps"]
+    assert len(steps) == 1, f"expected one step, got {[s['id'] for s in steps]}"
+    step = steps[0]
+    assert step["target"] == "external_dependencies"
+    assert step["transform"] == "set_default"
+    assert step["value"] == []
+    assert step["when_absent"] is True
+
+
+def test_v1_to_v2_invents_nothing() -> None:
+    """Every step must be an empty default. A non-empty value here would fabricate
+    dependency data that the v1 record never carried."""
+    for step in _v1_to_v2()["steps"]:
+        assert step["transform"] == "set_default", step["id"]
+        assert step["value"] == [], step["id"]
+        assert step.get("when_absent") is True, step["id"]
+
+
+def test_v1_to_v2_does_not_touch_dependencies_or_a_boundary_field() -> None:
+    targets = {s["target"].split(".")[-1] for s in _v1_to_v2()["steps"]}
+    assert "dependencies" not in targets
+    assert not targets & BOUNDARY_FIELDS
+
+
+def test_v1_to_v2_leaves_applied_to_empty_until_rollout() -> None:
+    """Naming a record claims work that has not happened. The ledger is not
+    migrated until the release, and this migration is not applied before then."""
+    assert _v1_to_v2().get("applied_to") == []
+
+
+def test_v2_requires_exactly_the_field_the_migration_adds() -> None:
+    """The migration and the schema must agree: v2 adds one required field, and the
+    migration adds exactly that one."""
+    root = load_contract().root
+    v1 = json.loads((root / "workitem" / "v1.schema.json").read_text())
+    v2 = json.loads((root / "workitem" / "v2.schema.json").read_text())
+    added_required = set(v2["required"]) - set(v1["required"])
+    added_properties = set(v2["properties"]) - set(v1["properties"])
+    assert added_required == added_properties == {"external_dependencies"}
+
+    targets = {s["target"] for s in _v1_to_v2()["steps"]}
+    assert targets == added_required
+
+
+def test_a_v1_shaped_record_fails_v2_and_passes_v1() -> None:
+    """The migration is necessary, not decorative: the gap it closes is real."""
+    root = load_contract().root
+    v1 = json.loads((root / "workitem" / "v1.schema.json").read_text())
+    v2 = json.loads((root / "workitem" / "v2.schema.json").read_text())
+    record = load_example(root, "task")
+
+    jsonschema.validate(record, v1)
+    record["schema_version"] = "2.0"
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(record, v2)
+
+    migrated = dict(record, external_dependencies=[])
+    jsonschema.validate(migrated, v2)
