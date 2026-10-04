@@ -13,7 +13,12 @@ required_before:
     privacy_required: true
 
   DONE:
+    # `all_required_verification` reads the RECORD's declared list; this reads the
+    # POLICY's floor. Both must pass, so DONE requires the union and a record
+    # cannot opt out of its own review policy by narrowing what it declares.
+    # See harkers/.github#31.
     all_required_verification: passed
+    policy_review_floor: passed
     completion_packet_required: true
 
 # The full gate table from spec section 7. `enforced: true` means a predicate

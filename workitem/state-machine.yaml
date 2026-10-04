@@ -90,6 +90,13 @@ transitions:
   - { from: IMPLEMENTATION_COMPLETE, to: TESTING }
   - { from: TESTING,            to: REVIEWING }
   - { from: REVIEWING,          to: VERIFYING }
+
+  # A record filed into the wrong state cannot be corrected otherwise, because
+  # every other exit from REVIEWING asserts something untrue: FAILED claims work
+  # was attempted, CHANGES_REQUIRED claims a review happened. Permitted only
+  # where it is honest -- a record that never claimed anything was done.
+  # See harkers/.github#40.
+  - { from: REVIEWING,          to: READY,      when: { no_criterion_met: true } }
   - { from: VERIFYING,          to: REPORTING }
   - { from: REPORTING,          to: PR_READY }
   - { from: PR_READY,           to: DONE }

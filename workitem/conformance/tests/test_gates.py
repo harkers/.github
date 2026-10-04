@@ -89,14 +89,48 @@ def test_done_passes_only_when_all_required_evidence_is_present() -> None:
     assert check_before(item, c.policy, DONE).ok
 
 
-def test_done_with_no_required_verification_still_needs_a_packet() -> None:
+def test_done_with_no_required_verification_is_refused_outright() -> None:
+    """INVERTED for workitem/v4.
+
+    This test used to assert that an empty `verification.required` still reached DONE
+    once a completion packet existed. It was pinning harkers/.github#31: the rule
+    read the record's own list, so `required: []` -- or any list naming only the
+    evidence that happened to pass -- opted the record out of its own review policy.
+
+    v4 requires the union of the record's list and the policy floor, so this record
+    cannot reach DONE at all. The packet assertion is kept below so the original
+    intent (a packet is required) is not lost in the inversion.
+    """
     c = load_contract()
     item = _workitem("investigation")
     assert item["verification"]["required"] == []
+    policy = item["verification"]["review_policy"]
+
+    item["completion"] = {"status": "complete", "packet": None}
+    assert not check_before(item, c.policy, DONE).ok
+
+    item["completion"] = {"status": "complete", "packet": "evidence/packet.md"}
+    result = check_before(item, c.policy, DONE)
+    assert not result.ok, f"an empty required list reached DONE under {policy!r}"
+    assert any("policy floor" in f or "to be 'passed'" in f for f in result.failures), (
+        f"expected a policy-floor failure, got {result.failures}"
+    )
+
+
+def test_done_needs_a_packet_even_when_the_floor_is_satisfied() -> None:
+    """The packet half of the inverted test, kept as its own case so a future
+    change cannot satisfy one requirement by breaking the other."""
+    c = load_contract()
+    item = _workitem("investigation")
+    item["verification"]["review_policy"] = "low_risk"
+    item["verification"]["required"] = []
+    item["verification"]["local_review"] = {"status": "passed", "evidence": []}
     item["completion"] = {"status": "complete", "packet": None}
     assert not check_before(item, c.policy, DONE).ok
     item["completion"] = {"status": "complete", "packet": "evidence/packet.md"}
-    assert check_before(item, c.policy, DONE).ok
+    assert check_before(item, c.policy, DONE).ok, (
+        "with the floor met, the packet is the only remaining requirement"
+    )
 
 
 def test_an_unknown_rule_key_is_a_hard_error_not_a_silent_pass() -> None:
