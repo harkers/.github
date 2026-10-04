@@ -159,16 +159,26 @@ def check_sizing(workitem: dict[str, Any], sizing_policy: dict[str, Any]) -> Gat
     return GateResult(not failures, failures)
 
 
-def check_declared_gates(workitem: dict[str, Any], policy: dict[str, Any]) -> GateResult:
-    """Check every gate the policy marks `enforced: true` with an artifact requirement.
+def check_declared_gates(
+    workitem: dict[str, Any],
+    policy: dict[str, Any],
+    state: str | None = None,
+) -> GateResult:
+    """Check the gates the policy marks `enforced: true` with an artifact requirement.
 
     Gates without an `artifact_required` field are enforced by `required_before`
     or by `check_review_transition`. This covers the artifact-presence family
     generically so no state name appears here.
+
+    `state` scopes the check to one state's gate. Without it every enforced gate is
+    evaluated, which demands a specification, a plan and a completion packet at once --
+    so it could only ever be called from a test, never from validation. harkers/.github#29.
     """
     failures: list[str] = []
     for gate in policy.get("gates", []):
         if not gate.get("enforced"):
+            continue
+        if state is not None and gate.get("state") != state:
             continue
         if not _condition_met(workitem, gate.get("when")):
             continue
@@ -183,6 +193,54 @@ def check_declared_gates(workitem: dict[str, Any], policy: dict[str, Any]) -> Ga
         if not ok:
             failures.append(f"{gate['state']} requires {dotted} ({gate['note'].strip()})")
     return GateResult(not failures, tuple(failures))
+
+
+def evaluate_state_gates(
+    workitem: dict[str, Any],
+    policy: dict[str, Any],
+    state: str,
+) -> GateResult:
+    """Run whichever predicate `policy.yaml` declares for `state`.
+
+    Dispatching on the declared predicate is what makes the gate table mean something.
+    Hardcoding `check_before` -- which is what validation did until harkers/.github#29 --
+    meant six of eight `enforced: true` gates could never fire, however clearly the
+    policy declared them.
+
+    An unknown predicate is a failure rather than a silent pass: a gate table that has
+    drifted from the checker must not read as clean.
+    """
+    gate = next((g for g in policy.get("gates", []) if g.get("state") == state), None)
+    predicate = (gate or {}).get("predicate")
+
+    if predicate is None:
+        # No gate declared for this state. States with no declared gate are ordinary
+        # mid-ladder states, not an omission to enforce against.
+        return GateResult(True, ())
+
+    if predicate == "check_before":
+        return check_before(workitem, policy, state)
+    if predicate == "check_declared_gates":
+        return check_declared_gates(workitem, policy, state=state)
+    if predicate == "check_review_transition":
+        if "review_policy" not in policy:
+            return GateResult(
+                False,
+                (
+                    "policy declares a check_review_transition gate but declares no "
+                    "review_policy block for it to read",
+                ),
+            )
+        return check_review_transition(workitem, policy)
+
+    return GateResult(
+        False,
+        (
+            f"policy gate for {state} declares predicate {predicate!r}, which this "
+            f"checker does not implement. Known: check_before, check_declared_gates, "
+            "check_review_transition.",
+        ),
+    )
 
 
 def check_forbidden_transitions(
