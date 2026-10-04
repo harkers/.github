@@ -136,8 +136,11 @@ def test_check_declared_gates_is_scoped_to_one_state(contract):
 #
 # The tests above cover SPEC_READY and PLAN_READY, both of which use
 # `check_declared_gates`. REVIEWING uses `check_review_transition` — a different
-# predicate — so it was the one state with no end-to-end case. That is why 288 tests
-# passed while four of harkers/workhub's fourteen records violated their own gate.
+# predicate — so it was the one state with no end-to-end case. That is why the suite
+# was green while five of harkers/workhub's fourteen records violated their own gate.
+#
+# Five, not four: WI-20261003-0005 was missed when this was first written. The count
+# comes from running the checker over the live ledger, not from reading it.
 
 
 def _reviewing_record(**verification):
