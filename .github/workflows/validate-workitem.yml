@@ -142,12 +142,41 @@ jobs:
           match = re.search(r"^current:\s*(\S+)", version_yaml, re.M)
           contract_version = match.group(1) if match else ref
 
-          schema_path = contract / "workitem" / "v1.schema.json"
+          # Resolve the schema file from the manifest, the same way the checker
+          # does. Hardcoding v1.schema.json made this record lie the moment v2
+          # shipped: the checker validated against v2.schema.json while the audit
+          # trail named -- and checksummed -- v1.schema.json. Provenance exists to
+          # answer "which schema validated these records", so a hardcoded answer
+          # is worse than none. See harkers/.github#18.
+          import yaml as _yaml
+
+          manifest = _yaml.safe_load(version_yaml)
+          entry = next(
+              (v for v in manifest["versions"]
+               if str(v["tag"]).rsplit("/", 1)[-1] == contract_version),
+              None,
+          )
+          if entry is None:
+              print(
+                  f"::error::current {contract_version!r} is not among the declared "
+                  f"versions {[v['tag'] for v in manifest['versions']]}"
+              )
+              sys.exit(1)
+          schema_major = str(entry["schema_version"]).split(".")[0]
+          schema_relative = f"workitem/v{schema_major}.schema.json"
+          schema_path = contract / schema_relative
+          if not schema_path.is_file():
+              print(
+                  f"::error::{entry['tag']} declares schema_version "
+                  f"{entry['schema_version']} but {schema_relative} is absent"
+              )
+              sys.exit(1)
+
           record = {
               "repo": repo,
               "requested_ref": ref,
               "resolved_sha": commit_sha,
-              "path": "workitem/v1.schema.json",
+              "path": schema_relative,
               "contract_version": contract_version,
               "fetched_at": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
               "checksum": hashlib.sha256(schema_path.read_bytes()).hexdigest(),

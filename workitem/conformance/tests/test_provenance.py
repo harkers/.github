@@ -147,10 +147,15 @@ def test_v1_1_is_a_data_release_and_keeps_schema_version_1_0() -> None:
     no-migration claim. So records stay "1.0" and the mapping is corrected.
     """
     c = load_contract()
-    assert c.version["current"] == "v1.1"
+    # By tag, not by `current`: v2 is current now, and the D8 claim is about what
+    # v1.1 did relative to v1, not about what happens to be current.
     entry = [v for v in c.version["versions"] if v["tag"] == "workitem/v1.1"]
     assert entry, "v1.1 must be declared"
     assert entry[0]["schema_version"] == "1.0"
+    v1 = [v for v in c.version["versions"] if v["tag"] == "workitem/v1"]
+    assert v1[0]["schema_version"] == entry[0]["schema_version"], (
+        "v1.1 is a data release, so it must keep v1's schema_version"
+    )
     assert entry[0]["released"] is not None
 
 
@@ -162,11 +167,34 @@ def test_a_contract_data_release_does_not_change_the_schema_version() -> None:
     """
     c = load_contract()
     declared = c.schema["properties"]["schema_version"]["const"]
+
+    # D8 says a *data* release keeps schema_version; only adding, removing or
+    # retyping a field may change it. So the invariant is between consecutive
+    # declared versions: schema_version either stays identical, or the major moves.
+    # Comparing every released version against the current const was only ever
+    # valid while a single schema existed -- it would forbid the v2 major bump,
+    # which is exactly the thing D8 permits.
+    ordered = sorted(
+        (v for v in c.version["versions"] if v["released"] is not None),
+        key=lambda v: v["released"],
+    )
+    for older, newer in zip(ordered, ordered[1:], strict=False):
+        old_major, old_minor = older["schema_version"].split(".")
+        new_major, new_minor = newer["schema_version"].split(".")
+        assert (old_major, old_minor) == (new_major, new_minor) or old_major != new_major, (
+            f"{newer['tag']} follows {older['tag']} and changes schema_version "
+            f"{older['schema_version']} -> {newer['schema_version']} without a major "
+            "bump. That is a tightening disguised as a data release: it invalidates "
+            "records with no version signal."
+        )
+
     for entry in c.version["versions"]:
         if entry["tag"] == c.version["current"]:
             continue
         if entry["released"] is None:
             continue
+        if entry["schema_version"].split(".")[0] != declared.split(".")[0]:
+            continue  # a different schema major, checked by its own file
         assert entry["schema_version"] == declared, (
             f"{entry['tag']} is released with schema_version {entry['schema_version']}, "
             f"but v1.schema.json pins {declared}"

@@ -105,7 +105,10 @@ def test_every_boundary_field_the_target_schema_requires_is_required_by_some_ste
 def test_the_adoption_migration_demands_every_added_required_field() -> None:
     """Anything v1 newly requires must be derived or demanded — never quietly absent."""
     c = load_contract()
-    doc = _load(_migration_files()[0])
+    root = c.root
+    adoption = root / MIGRATIONS / "v0.9-to-v1.yaml"
+    assert adoption.is_file(), f"the adoption migration must exist: {adoption}"
+    doc = _load(adoption)
     handled: set[str] = set()
     for step in doc["steps"]:
         handled.add(step["target"].split(".")[0])
@@ -134,7 +137,16 @@ def test_the_adoption_migration_demands_every_added_required_field() -> None:
         "completion",
         "timestamps",
     }
-    unhandled = set(c.schema["required"]) - handled - pre_existing
+    # Against the v1 schema specifically, not load_contract().schema: this
+    # migration's declared `to` is 1.0, so validating it against the current schema
+    # made it demand a v2 field it has no business knowing about. Comparing a
+    # migration to the version it targets is the whole point of its `to:` key.
+    v1 = json.loads((c.root / "workitem" / "v1.schema.json").read_text())
+    assert doc["to"] == str(v1["properties"]["schema_version"]["const"]), (
+        f"this migration targets {doc['to']} but v1.schema.json declares "
+        f"{v1['properties']['schema_version']['const']}"
+    )
+    unhandled = set(v1["required"]) - handled - pre_existing
     assert not unhandled, f"v1 requires {sorted(unhandled)} but no step addresses them"
 
 
@@ -154,7 +166,7 @@ def test_drop_steps_only_target_fields_v1_does_not_carry() -> None:
 
 
 def test_the_adoption_migration_documents_which_records_it_applies_to() -> None:
-    doc = _load(_migration_files()[0])
+    doc = _load(load_contract().root / MIGRATIONS / "v0.9-to-v1.yaml")
     applied = doc.get("applied_to")
     assert applied, "an adoption migration must record the records it was applied to"
     for entry in applied:
@@ -229,11 +241,17 @@ def test_v2_requires_exactly_the_field_the_migration_adds() -> None:
 
 
 def test_a_v1_shaped_record_fails_v2_and_passes_v1() -> None:
-    """The migration is necessary, not decorative: the gap it closes is real."""
+    """The migration is necessary, not decorative: the gap it closes is real.
+
+    Built from a real example then rolled back to 1.0, because examples/ is
+    v2-shaped since the v2 release -- an example is no longer a v1 record.
+    """
     root = load_contract().root
     v1 = json.loads((root / "workitem" / "v1.schema.json").read_text())
     v2 = json.loads((root / "workitem" / "v2.schema.json").read_text())
     record = load_example(root, "task")
+    record["schema_version"] = "1.0"
+    record.pop("external_dependencies", None)
 
     jsonschema.validate(record, v1)
     record["schema_version"] = "2.0"
