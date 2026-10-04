@@ -20,7 +20,7 @@ from typing import Any
 import yaml
 
 from workitem_conformance.contract import Contract
-from workitem_conformance.gates import check_before, check_sizing, evaluate_state_gates
+from workitem_conformance.gates import check_sizing, evaluate_state_gates
 from workitem_conformance.transitions import TransitionEngine
 
 ID_PATTERN = re.compile(r"^WI-\d{8}-\d{4}$")

@@ -195,7 +195,6 @@ def check_declared_gates(
     return GateResult(not failures, tuple(failures))
 
 
-
 def evaluate_state_gates(
     workitem: dict[str, Any],
     policy: dict[str, Any],
@@ -227,8 +226,10 @@ def evaluate_state_gates(
         if "review_policy" not in policy:
             return GateResult(
                 False,
-                ("policy declares a check_review_transition gate but declares no "
-                 "review_policy block for it to read",),
+                (
+                    "policy declares a check_review_transition gate but declares no "
+                    "review_policy block for it to read",
+                ),
             )
         return check_review_transition(workitem, policy)
 

@@ -154,9 +154,16 @@ def test_a_malformed_edge_alongside_a_good_one_is_ignored_not_fatal(bad):
         "dependencies": [{"target": "WI-20261004-0002", "type": "REQUIRES"}, bad],
         "external_dependencies": [bad],
     }
-    other = {"id": "WI-20261004-0002", "state": "DONE", "dependencies": [], "external_dependencies": []}
+    other = {
+        "id": "WI-20261004-0002",
+        "state": "DONE",
+        "dependencies": [],
+        "external_dependencies": [],
+    }
     codes = codes_for([record, other])
-    assert "dependency-not-satisfied" not in codes, "the good edge resolved; the bad one is the schema's problem"
+    assert "dependency-not-satisfied" not in codes, (
+        "the good edge resolved; the bad one is the schema's problem"
+    )
 
 
 def test_a_non_list_dependency_field_does_not_crash():

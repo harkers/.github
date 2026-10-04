@@ -199,7 +199,9 @@ def test_v3_is_v2_plus_one_arm():
     # resolved_by arm is v2's arm unchanged -- it must NOT gain attested, or the two
     # arms would overlap and exclusivity would be enforced only by required-keys.
     v2_keys = set(v2["properties"]["external_dependencies"]["items"]["properties"])
-    arms = {arm["title"]: arm for arm in SCHEMA["properties"]["external_dependencies"]["items"]["oneOf"]}
+    arms = {
+        arm["title"]: arm for arm in SCHEMA["properties"]["external_dependencies"]["items"]["oneOf"]
+    }
     allowed = v2_keys | {"attested"}
 
     resolved = arms["discharged by a completed WorkItem"]
