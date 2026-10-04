@@ -1,7 +1,7 @@
 # Decision 0001: `BLOCKED` must preserve progress position
 
 **Date:** 2026-10-04
-**Status:** Proposed
+**Status:** SUPERSEDED by `0002` — rejected on review, see *Review outcome* below
 **Canonical contract:** `harkers/.github` `workitem/` at tag `workitem/v3`
 **Related:** harkers/.github#22, #8 (closed); harkers/workhub ADR 0005
 **Scope:** contract. The schema and state machine are `harkers/.github`'s to change.
@@ -68,7 +68,30 @@ this and is commented as deliberate.
 "does not want to hard-code" that. Following that reasoning here would be
 inconsistent.
 
-## Decision
+## Review outcome
+
+Cloud review on 2026-10-04 found this record **wrong at its centre**, not merely imperfect. Two blockers, both verified independently:
+
+**Option (a) cannot execute.** It records the resume position in `hierarchy.blocked_from`, but `BLOCKED`'s only declared exit is `READY` (`state-machine.yaml:128`), and `TransitionEngine` reads only `states`, `terminal`, `transitions`, `parameters` — `block:`, `resume_state` and `resume_requires` are inert to it. Measured:
+
+```text
+BLOCKED -> READY       legal=True   declared edge
+BLOCKED -> REVIEWING   legal=False  no declared edge
+```
+
+So the headline consequence below — *"A WorkItem blocked during `REVIEWING` resumes at `REVIEWING`"* — **is false under this decision as written.** A dynamic exit target is not expressible in `transitions:`.
+
+**`resume_requires: unblock_decision` contradicts this record's own invariant.** Enforced through the only available mechanism (`required_before`), it fails the anti-trap pin at `test_antitrap_invariant.py:49` and reds both live `BLOCKED` records. And nothing reads `resume_requires` anywhere — the cited precedent, `recovery_decision`, is itself decorative, with no schema field to attach a decision to.
+
+**The merger with #26 was unfounded.** `blocked_from` is not needed for the retroactive freeze, and the two fields have *opposite* semantics: `visited_states` is accumulating history (correct for a monotonic freeze), `blocked_from` is single-valued position. One reasoning was applied to both.
+
+Three of this record's own cost claims were false in ways that biased the comparison toward (a): the write is not a "new class of behaviour" (`cmd_transition` already writes on every transition); option (b) is not "zero new fields" (`hierarchy` is `additionalProperties: false` at v1, v2 **and** v3, so `visited_states` cannot be collected at all); and option (c) was rejected on an **inverted quote** — the contract declares topology centrally *so downstream code need not hard-code it*, which is precedent *for* (c).
+
+**Kept, because it survives:** the problem statement, the measured blast radius, and the observation that `workitem/v3`'s attested discharge makes blocking more common and therefore this more consequential.
+
+Superseded by `0002-blocked-exit-topology.md`.
+
+## Decision (REJECTED — recorded for the audit trail)
 
 **(a).**
 
