@@ -180,3 +180,65 @@ def test_reviewing_and_done_read_the_same_floor():
     record["verification"] = _verification()
     assert not check_review_transition(record, contract.policy).ok
     assert not check_before(record, contract.policy, "DONE").ok
+
+
+# --- F1: the guard covered one edge into READY, not the backward ones -------
+
+
+@pytest.mark.parametrize("source", ["REVIEWING", "FAILED", "BLOCKED"])
+def test_no_backward_edge_into_ready_skips_the_guard(source):
+    """`no_criterion_met` guarded REVIEWING -> READY and nothing else.
+
+    FAILED -> READY and BLOCKED -> READY were unconditional, so a record that had
+    claimed completed work returned to READY in two hops -- reproduced end-to-end
+    through `workhub work transition`, not just at the engine:
+
+        REVIEWING --to READY   REFUSED   (the guard)
+        REVIEWING --to FAILED  ACCEPTED
+        FAILED    --to READY   ACCEPTED  state=READY, AC-001 still 'met'
+
+    The invariant #40 claims is "you may return to READY only if you never claimed
+    anything was done". That has to hold on every backward edge, or it is not an
+    invariant -- only a property of the edge someone remembered to guard.
+    """
+    contract = load_contract()
+    engine = TransitionEngine(contract.state_machine)
+    verdict = engine.check(source, "READY", _ctx(any_criterion_met=True))
+    assert not verdict.legal, f"{source} -> READY skipped the no_criterion_met guard"
+    assert "no_criterion_met" in verdict.reason
+
+
+@pytest.mark.parametrize("source", ["REVIEWING", "FAILED", "BLOCKED"])
+def test_every_backward_edge_into_ready_is_permitted_when_nothing_was_built(source):
+    """The other direction. Guarding an edge must not trap a record in it."""
+    contract = load_contract()
+    engine = TransitionEngine(contract.state_machine)
+    assert engine.check(source, "READY", _ctx(any_criterion_met=False)).legal
+
+
+def test_the_forward_ladder_into_ready_is_untouched():
+    """PLAN_READY -> READY is the forward edge and must NOT be guarded.
+
+    Guarding every edge into READY looks thorough and breaks the ladder: a record
+    that legitimately finished planning with a criterion already met could never
+    start. Only the backward edges move against the direction of progress.
+    """
+    contract = load_contract()
+    engine = TransitionEngine(contract.state_machine)
+    verdict = engine.check("PLAN_READY", "READY", _ctx(any_criterion_met=True))
+    assert verdict.legal, verdict.reason
+
+
+def test_the_backward_edges_are_the_ones_declared_guarded():
+    """Assert the shape, so adding a fourth backward edge without a guard fails."""
+    machine = load_contract().state_machine
+    happy = list(machine["states"]["happy_path"])
+    ready_index = happy.index("READY")
+    into_ready = [e for e in machine["transitions"] if e["to"] == "READY"]
+    for edge in into_ready:
+        forward = happy.index(edge["from"]) < ready_index if edge["from"] in happy else False
+        guarded = (edge.get("when") or {}).get("no_criterion_met") is True
+        assert forward or guarded, (
+            f"{edge['from']} -> READY moves backwards but declares no guard, so a "
+            "record with completed work can reach READY through it"
+        )
