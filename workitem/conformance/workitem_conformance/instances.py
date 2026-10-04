@@ -20,7 +20,7 @@ from typing import Any
 import yaml
 
 from workitem_conformance.contract import Contract
-from workitem_conformance.gates import check_before, check_sizing
+from workitem_conformance.gates import check_before, check_sizing, evaluate_state_gates
 from workitem_conformance.transitions import TransitionEngine
 
 ID_PATTERN = re.compile(r"^WI-\d{8}-\d{4}$")
@@ -199,7 +199,11 @@ def check_instance(
     else:
         # A record may not sit in a state whose own gate it fails. This is what
         # stops a hand-edited `state: DONE` with nothing verified.
-        verdict = check_before(item, contract.policy, state)
+        #
+        # Dispatched on the gate table's declared predicate, not hardcoded. Until
+        # harkers/.github#29 this called check_before unconditionally, so six of the
+        # eight `enforced: true` gates could never fire.
+        verdict = evaluate_state_gates(item, contract.policy, state)
         if not verdict.ok:
             problems.append(
                 InstanceProblem(rel, "state-gate", f"state {state}: {'; '.join(verdict.failures)}")
