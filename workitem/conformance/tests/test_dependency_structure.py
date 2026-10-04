@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 from workitem_conformance.instances import check_ledger, find_cycles
 
 
