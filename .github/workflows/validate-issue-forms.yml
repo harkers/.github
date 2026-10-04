@@ -1,0 +1,63 @@
+name: Validate issue forms
+
+on:
+  pull_request:
+    paths:
+      - ".github/ISSUE_TEMPLATE/bug-incident.yml"
+      - ".github/ISSUE_TEMPLATE/security-finding.yml"
+      - ".github/ISSUE_TEMPLATE/review-finding.yml"
+      - ".github/workflows/validate-issue-forms.yml"
+  push:
+    branches: [main]
+    paths:
+      - ".github/ISSUE_TEMPLATE/bug-incident.yml"
+      - ".github/ISSUE_TEMPLATE/security-finding.yml"
+      - ".github/ISSUE_TEMPLATE/review-finding.yml"
+      - ".github/workflows/validate-issue-forms.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install YAML parser
+        run: python -m pip install --disable-pip-version-check pyyaml
+      - name: Validate P0-P3 priority contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          files = [
+              Path('.github/ISSUE_TEMPLATE/bug-incident.yml'),
+              Path('.github/ISSUE_TEMPLATE/security-finding.yml'),
+              Path('.github/ISSUE_TEMPLATE/review-finding.yml'),
+          ]
+          expected = ['P0', 'P1', 'P2', 'P3']
+
+          for path in files:
+              data = yaml.safe_load(path.read_text(encoding='utf-8'))
+              body = data.get('body', [])
+              priorities = [item for item in body if item.get('id') == 'priority']
+              assert len(priorities) == 1, f'{path}: expected exactly one priority field'
+              field = priorities[0]
+              assert field.get('type') == 'dropdown', f'{path}: priority must be dropdown'
+              assert field.get('validations', {}).get('required') is True, f'{path}: priority must be required'
+              options = field.get('attributes', {}).get('options', [])
+              prefixes = [str(option).split(' ', 1)[0] for option in options]
+              assert prefixes == expected, f'{path}: priority options must be P0/P1/P2/P3, got {prefixes}'
+
+              severities = [item for item in body if item.get('id') == 'severity']
+              assert len(severities) == 1, f'{path}: existing severity field must remain'
+              severity_description = severities[0].get('attributes', {}).get('description', '')
+              assert 'separate from remediation priority' in severity_description.lower(), (
+                  f'{path}: severity/priority distinction is not explicit'
+              )
+              print(f'OK {path}: Severity retained, Priority=P0/P1/P2/P3 required')
+          PY
