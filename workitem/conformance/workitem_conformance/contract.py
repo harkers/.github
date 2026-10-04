@@ -49,16 +49,42 @@ def _read_yaml(root: Path, relative: str) -> dict[str, Any]:
     return loaded
 
 
+def _schema_filename(version: dict[str, Any]) -> str:
+    """Resolve the schema file from the current version's declared schema_version.
+
+    The filename tracks the schema major, not the tag: a data release (v1.1) keeps
+    schema_version 1.0 and therefore keeps v1.schema.json, while a field-adding
+    release (v2) moves to v2.schema.json. Hardcoding a filename here would make a
+    second schema unloadable.
+
+    `current` is a short name ("v1.1") while versions[].tag is the full tag
+    ("workitem/v1.1"), so the two are compared on the tag's last path segment.
+    """
+    current = version["current"]
+    entry = next(
+        (v for v in version["versions"] if str(v["tag"]).rsplit("/", 1)[-1] == current),
+        None,
+    )
+    if entry is None:
+        raise ContractError(
+            f"contract-version.yaml: current {current!r} is not among the "
+            f"declared versions {[v['tag'] for v in version['versions']]}"
+        )
+    major = str(entry["schema_version"]).split(".")[0]
+    return f"workitem/v{major}.schema.json"
+
+
 @lru_cache(maxsize=8)
 def load_contract(root: Path | None = None) -> Contract:
     base = (root or DEFAULT_ROOT).resolve()
+    version = _read_yaml(base, "workitem/contract-version.yaml")
     return Contract(
         root=base,
-        schema=_read_json(base, "workitem/v1.schema.json"),
+        schema=_read_json(base, _schema_filename(version)),
         state_machine=_read_yaml(base, "workitem/state-machine.yaml"),
         policy=_read_yaml(base, "workitem/policy.yaml"),
         sizing_policy=_read_yaml(base, "workitem/sizing-policy.yaml"),
-        version=_read_yaml(base, "workitem/contract-version.yaml"),
+        version=version,
     )
 
 
